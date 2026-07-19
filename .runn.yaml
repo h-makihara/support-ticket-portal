@@ -1,0 +1,11 @@
+clients:
+  http: {}
+
+include:
+  - tests/init_test.yaml
+  - tests/pagination_test.yaml
+
+default:
+  retryInterval: 1s
+  retryCount: 3
+  timeout: 30s

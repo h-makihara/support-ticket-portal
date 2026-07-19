@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ticket-portal"
+version = "0.1.0"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "pydantic",
+    "python-dotenv",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-grpc",
+    "opentelemetry-instrumentation-fastapi",
+    "opentelemetry-instrumentation-httpx",
+]
+
+[tool.uv]
+# Enable pipx style package execution
+[tool.uv.dependencies]
+fastapi = "*"
+uvicorn[standard] = "*"
+httpx = "*"
+python-dotenv = "*"
+opentelemetry-api = "*"
+opentelemetry-sdk = "*"
+opentelemetry-exporter-otlp-proto-grpc = "*"
+opentelemetry-instrumentation-fastapi = "*"
+opentelemetry-instrumentation-httpx = "*"

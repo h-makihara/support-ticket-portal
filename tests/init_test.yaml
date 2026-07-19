@@ -1,0 +1,112 @@
+# runnテスト — Redmine 初期化スクリプトの動作確認
+# 使い方:
+#   runn -e REDMINE_URL=http://localhost:3000 tests/init_test.yaml
+
+envs:
+  REDMINE_URL: "http://localhost:3000"
+  PROJECT_IDENTIFIER: "internal-inquiry"
+
+vars:
+  redmineUrl: "${REDMINE_URL}"
+
+steps:
+  # ── Step 1: Redmine が起動していることを確認 ────────────────────
+  - describe: "Redmine is up and loginable"
+    request:
+      url: "${vars.redmineUrl}/login"
+    assertions:
+      - len(response.body) > 0
+
+  # ── Step 2: API Key を取得（admin/admin でログイン） ────────────
+  - describe: "Get API key via admin login"
+    request:
+      url: "${vars.redmineUrl}/my/account/key.json"
+      headers:
+        Authorization: "Basic YWRtaW46YWRtaW4="
+    vars:
+      apiKey: response.body.api_key
+    assertions:
+      - eq: [response.status, 200]
+      - len(vars.apiKey) > 10
+
+  # ── Step 3: プロジェクトが存在することを確認 ────────────────────
+  - describe: "Project '社内問い合わせ' exists"
+    request:
+      url: "${vars.redmineUrl}/projects.json"
+      headers:
+        X-Redmine-API-Key: "${vars.apiKey}"
+      params:
+        limit: 100
+    vars:
+      projects: response.body.projects
+      foundProject: >-
+        ${vars.projects.filter(p => p.identifier === "${PROJECT_IDENTIFIER}")[0]}
+    assertions:
+      - len(vars.foundProject.name) > 0
+      - eq: [vars.foundProject.identifier, "internal-inquiry"]
+    vars:
+      projectId: vars.foundProject.id
+
+  # ── Step 4: トラッカー「問い合わせ」が存在することを確認 ────────
+  - describe: "Tracker '問い合わせ' exists"
+    request:
+      url: "${vars.redmineUrl}/trackers.json"
+      headers:
+        X-Redmine-API-Key: "${vars.apiKey}"
+    vars:
+      trackers: response.body.trackers
+      foundTracker: >-
+        ${vars.trackers.filter(t => t.name === "問い合わせ")[0]}
+    assertions:
+      - len(vars.foundTracker.id) > 0
+      - eq: [vars.foundTracker.name, "問い合わせ"]
+    vars:
+      trackerId: vars.foundTracker.id
+
+  # ── Step 5: ステータス定義を確認（New/In Progress/Reopened/Closed が存在）──
+  - describe: "Default issue statuses exist (New=1, In Progress=2, Reopened=3, Closed=4)"
+    request:
+      url: "${vars.redmineUrl}/issue_statuses.json"
+      headers:
+        X-Redmine-API-Key: "${vars.apiKey}"
+    vars:
+      statuses: response.body.issue_statuses
+      statusMap: >-
+        ${Object.fromEntries(
+          vars.statuses.map(s => [s.name.toLowerCase(), {id: s.id, slug: s.slug}])
+        )}
+    assertions:
+      - len(vars.statusMap.new || vars.statusMap.新 || vars.statusMap.shinki || {}) > 0
+      - len(vars.statuses) >= 4
+
+  # ── Step 6: カスタムロール「営業担当者」と「サポート担当者」が存在することを確認 ───
+  - describe: "Custom roles exist"
+    request:
+      url: "${vars.redmineUrl}/roles.json"
+      headers:
+        X-Redmine-API-Key: "${vars.apiKey}"
+    vars:
+      roles: response.body.roles
+      foundSalesRole: >-
+        ${vars.roles.filter(r => r.name === "営業担当者")[0]}
+      foundSupportRole: >-
+        ${vars.roles.filter(r => r.name === "サポート担当者")[0]}
+    assertions:
+      - len(vars.foundSalesRole.id) > 0
+      - len(vars.foundSupportRole.id) > 0
+
+  # ── Step 7: Backend が起動しており /status/options を返すことを確認 ───
+  - describe: "Backend API is reachable and returns status options"
+    request:
+      url: "http://localhost:8000/status/options"
+    assertions:
+      - eq: [response.status, 200]
+      - len(response.body) >= 4
+
+  # ── Step 8: チケット一覧 API が動作することを確認 ───────────────
+  - describe: "Tickets list API works"
+    request:
+      url: "http://localhost:8000/tickets"
+    assertions:
+      - eq: [response.status, 200]
+

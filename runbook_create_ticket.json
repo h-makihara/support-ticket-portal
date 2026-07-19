@@ -1,0 +1,21 @@
+{
+  "desc": "Create ticket and add comment",
+  "steps": [
+    {
+      "exec": {
+        "command": "curl -s -X POST http://localhost:8000/tickets -H 'Content-Type: application/json' -d '{\"subject\":\"Integration test\",\"description\":\"Testing ticket creation\"}'"
+      }
+    },
+    {
+      "exec": {
+        "command": "curl -s -X POST http://localhost:8000/tickets/1/comments -H 'Content-Type: application/json' -d '{\"body\":\"Comment from runn\"}'"
+      }
+    },
+    {
+      "exec": {
+        "command": "curl -s -X PATCH http://localhost:8000/tickets/1/status -H 'Content-Type: application/json' -d '{\"status_id\":2}'"
+      }
+    }
+  ]
+}
+

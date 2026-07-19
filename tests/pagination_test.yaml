@@ -1,0 +1,80 @@
+# runnテスト — ページネーション機能の動作確認
+# 使い方:
+#   runn -e REDMINE_URL=http://localhost:3000 tests/pagination_test.yaml
+
+envs:
+  REDMINE_URL: "http://localhost:3000"
+  BACKEND_URL: "http://localhost:8000"
+
+vars:
+  redmineUrl: "${REDMINE_URL}"
+  backendUrl: "${BACKEND_URL}"
+
+steps:
+  # ── Step 1: Backend が起動していることを確認 ────────────────────
+  - describe: "Backend is reachable"
+    request:
+      url: "${vars.backendUrl}/status/options"
+    assertions:
+      - eq: [response.status, 200]
+
+  # ── Step 2: チケット一覧 API のレスポンス構造を確認（pagination キーが含まれる）──
+  - describe: "Tickets list response includes pagination metadata"
+    request:
+      url: "${vars.backendUrl}/tickets?limit=10&offset=0"
+    vars:
+      ticketData: response.body
+    assertions:
+      - eq: [response.status, 200]
+      # Response should be an object with tickets array and pagination info
+      - len(vars.ticketData.tickets) >= 0
+      - len(vars.ticketData.pagination.limit) > 0
+      - len(vars.ticketData.pagination.offset) > 0
+      - len(vars.ticketData.pagination.total_count) >= 0
+
+  # ── Step 3: limit パラメータが機能することを確認 ───────────────
+  - describe: "Limit parameter restricts returned tickets"
+    request:
+      url: "${vars.backendUrl}/tickets?limit=5&offset=0"
+    vars:
+      limitedData: response.body
+    assertions:
+      - eq: [response.status, 200]
+      # Should return at most 5 tickets
+      - len(vars.limitedData.tickets) <= 5
+      - eq: [vars.limitedData.pagination.limit, 5]
+      - eq: [vars.limitedData.pagination.offset, 0]
+
+  # ── Step 4: offset パラメータが機能することを確認 ─────────────
+  - describe: "Offset parameter skips tickets"
+    request:
+      url: "${vars.backendUrl}/tickets?limit=10&offset=10"
+    vars:
+      offsetData: response.body
+    assertions:
+      - eq: [response.status, 200]
+      - eq: [vars.offsetData.pagination.offset, 10]
+
+  # ── Step 5: デフォルトlimit (100) が機能することを確認 ────────
+  - describe: "Default limit of 100 is applied when no params"
+    request:
+      url: "${vars.backendUrl}/tickets"
+    vars:
+      defaultData: response.body
+    assertions:
+      - eq: [response.status, 200]
+      - len(vars.defaultData.pagination.limit) > 0
+
+  # ── Step 6: has_more フィールドが正しく設定されることを確認 ────
+  - describe: "has_more field is set correctly based on total_count"
+    request:
+      url: "${vars.backendUrl}/tickets?limit=100&offset=0"
+    vars:
+      fullData: response.body
+      hasMoreResult: >-
+        ${vars.fullData.pagination.total_count > (vars.fullData.pagination.offset + vars.fullData.tickets.length)}
+    assertions:
+      - eq: [response.status, 200]
+      # If total_count > returned tickets, has_more should be true
+      - len(vars.fullData.pagination.has_more) > 0
+

@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: redmine_pg
+    environment:
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+      POSTGRES_DB: "redmine"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redmine:
+    image: redmine:6.1
+    container_name: redmine
+    ports:
+      - "3000:3000"
+    environment:
+      REDMINE_DB_POSTGRES: "postgres"
+      REDMINE_DB_USER: "postgres"
+      REDMINE_DB_PASSWORD: "postgres"
+      REDMINE_DB_NAME: "redmine"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - redmine_data:/usr/src/redmine/files
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ticket_backend
+    ports:
+      - "8000:8000"
+    environment:
+      REDMINE_BASE_URL: "http://redmine:3000"
+      REDMINE_API_KEY: "${REDMINE_API_KEY:-10715d6427cd67bf1356eb487673a37fb801fe96}"
+      REDMINE_PROJECT_ID: "${REDMINE_PROJECT_ID:-1}"
+      REDMINE_TRACKER_ID: "${REDMINE_TRACKER_ID:-3}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "tempo:4317"
+    depends_on:
+      - redmine
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.frontend
+    container_name: ticket_frontend
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+
+  # ── OpenTelemetry tracing (Tempo) ────────────────────────────────
+  tempo:
+    image: grafana/tempo:latest
+    container_name: ticket_tempo
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    ports:
+      - "4317:4317"   # OTLP gRPC (ingest)
+      - "3200:3200"   # HTTP UI
+    volumes:
+      - ./tempo-config.yml:/etc/tempo.yaml:ro
+    depends_on:
+      - postgres
+
+volumes:
+  redmine_data:
+  pg_data:
