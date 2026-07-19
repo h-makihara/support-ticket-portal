@@ -84,3 +84,20 @@ export interface TicketStatusOption {
 export async function getTicketStatusOptions(): Promise<TicketStatusOption[]> {
   return request<TicketStatusOption[]>('/status/options')
 }
+
+// ── Audit Log Types ────────────────────────────────────────────────
+
+export interface AuditChange {
+  field: string
+  display_field: string
+  old_value?: string | null
+  new_value?: string | null
+}
+
+export interface AuditEntry {
+  type: 'comment' | 'change' | 'both'
+  author: string
+  created_on: string
+  comment?: string
+  changes: AuditChange[]
+}

@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.4.0 — 監査ログ機能追加 (2026-07-19)
+
+### 新機能
+
+#### Backend: 監査ログ API (`src/backend/app.py`)
+
+チケット詳細の `audit_log` フィールドに、以下の情報が含まれる：
+
+| フィールド | タイプ | 説明 |
+|-----------|--------|------|
+| type | "comment" \| "change" \| "both" | エントリータイプ |
+| author | string | 変更者名 |
+| created_on | string | 変更時刻 |
+| comment | string? | コメント本文（存在する場合） |
+| changes[] | AuditChange[] | フィールド変更一覧 |
+
+AuditChange:
+| field | display_field | old_value | new_value | 説明 |
+|-------|-------------|-----------|-----------|------|
+| prop_key | フィールド名 | 変更前 | 変更後 | Redmine journal details から取得 |
+
+フィールド名マッピング：
+```python
+_FIELD_NAME_MAP = {
+    "tracker": "トラッカー",
+    "status": "ステータス",
+    "priority": "優先度",
+    "category": "カテゴリ",
+    "assigned_to": "担当者",
+    "subject": "件名",
+    "description": "説明",
+    # ... etc.
+}
+```
+
+#### Frontend: 監査ログコンポーネント (`components/AuditLog.tsx`)
+
+タイムライン形式で変更履歴を表示：
+- 💬 コメント（青色ドット）
+- 🔄 フィールド変更（オレンジ色ドット）
+- フィールド変更表（フィールド名 | 変更前 | 変更後）
+- 作成順ソート（古い順）
+
+### テスト追加
+
+#### `tests/audit_test.yaml` (新規作成)
+
+| Step | 検証項目 |
+|------|---------|
+| 1 | Backend の起動確認 |
+| 2 | テスト用チケット作成 |
+| 3 | audit_log キーが API レスポンスに含まれる |
+| 4 | コメント追加 → 監査ログ更新 |
+| 5 | コメントが audit_log に記録される |
+| 6 | ステータス変更 → 監査ログ更新 |
+| 7 | ステータス変更が audit_log に記録される |
+
+### ドキュメント更新
+
+| ファイル | 変更内容 |
+|---------|---------|
+| `docs/redmine.md` (更新) | 監査ログ機能の説明追加 |
+| `docs/changelog.md` (更新) | v0.4.0 の変更履歴追記 |
+
+---
+
 ## v0.3.0 — ページネーション & エラーハンドリング (2026-07-19)
 
 ### 新機能
@@ -53,11 +119,6 @@ GET /tickets?status=open&limit=10&offset=0
 | `TicketDetail.tsx` | 取得失敗時、コメント追加失敗時、ステータス更新失敗時の個別ハンドリング |
 | `TicketCreate.tsx` | 作成失敗時のエラーメッセージ表示 |
 
-エラー状態:
-- 🔴 API接続不良 → エラーバナー + 再試行ボタン
-- 🟡 必須入力漏れ → フォーム検証エラー
-- ⚪ 処理中 → ローディングインジケータ（スピナ/テキスト）
-
 ### テスト追加
 
 #### `tests/pagination_test.yaml` (新規作成)
@@ -88,40 +149,6 @@ Redmine REST API を叩いて、以下のリソースを自動作成します：
 | ロール | `営業担当者` | チケット作成・確認・クローズ権限 |
 | ロール | `サポート担当者` | 回答・ステータス更新権限 |
 
-- **冪等性 (Idempotent)**: 既に存在するリソースはスキップします。
-- **.env 自動生成**: API Key / プロジェクト ID を `.env` に書き出します。
-- **Redmine 待機**: Redmine が起動するまで最大180秒待機します。
-
-#### `scripts/init.sh` (更新, 46行)
-
-全手順を自動実行：
-
-```bash
-./scripts/init.sh
-# → docker compose up postgres+redmine → init_redmine.py → backend+frontend+tempo
-```
-
-#### Backend: ステータス動的解決 (`src/backend/app.py`, 334行)
-
-- Redmine 起動時に `/issue_statuses.json` を叩いてステータスマッピングを構築
-- Redmine に接続できない場合、デフォルトマッピング (New=1, In Progress=2, Reopened=3, Closed=4) にフォールバック
-- `GET /status/options`: フロントエンド向けのステータスドロップダウン用データ
-
-#### Backend: ジャーナル（コメント履歴）取得 (`src/backend/app.py`)
-
-- `GET /tickets/{id}` で `?include=journals` を使い、Redmine の journals データを取得
-- `_journals_to_notes()`: Redmine journals → frontend が扱いやすい `notes[]` 形式に変換
-- journal entries からテキストコメントのみを抽出（ステータス変更ログなどは除外）
-
-#### Frontend: API Client 更新 (`frontend/src/api/client.ts`, 62行)
-
-- `getTicketStatusOptions()`: `/status/options` を呼ぶ新APIメソッド追加
-
-#### Frontend: ステータスドロップダウンの動的化 (`frontend/src/pages/TicketDetail.tsx`, 109行)
-
-- Redmine から取得したステータス一覧をドロップダウンに表示
-- ハードコード済みの4ステータス → API から取得するように変更
-
 ### テスト
 
 #### `tests/init_test.yaml` (新規作成, 112行)
@@ -146,19 +173,6 @@ runn を使用して、以下を8ステップで検証：
 | `docs/setup.md` (新規) | セットアップガイド・クイックスタート |
 | `docs/redmine.md` (更新) | 初期化スクリプトの説明追加、ステータス定義見直し |
 | `docs/index.md` (更新) | ドキュメント構造の整理・テスト項目追加 |
-
-### ステータス定義の変更
-
-旧: カスタムステータス6種（新規・回答待ち・営業確認中・追加質問あり・技術確認中・クローズ）
-
-新: Redmine デフォルト4種（New/In Progress/Reopened/Closed）→ 英語キーマッピングで解釈
-
-| ID | Redmine Status | 英語キー | 役割 |
-|---|---|---|---|
-| 1 | New | `open` | 新規受付（営業作成直後） |
-| 2 | In Progress | `in_progress` | サポート対応中・技術確認中 |
-| 3 | Reopened | `feedback` | 追加質問 / フィードバック待ち |
-| 4 | Closed | `closed` | 完了・クローズ |
 
 ---
 

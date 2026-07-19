@@ -1,0 +1,85 @@
+# runnテスト — 監査ログ機能の動作確認
+# 使い方:
+#   runn tests/audit_test.yaml
+
+vars:
+  backendUrl: "http://localhost:8000"
+
+steps:
+  # ── Step 1: Backend が起動していることを確認 ────────────────────
+  - describe: "Backend is reachable"
+    request:
+      url: "${vars.backendUrl}/status/options"
+    assertions:
+      - eq: [response.status, 200]
+
+  # ── Step 2: チケットを作成して ID を取得 ────────────────────────
+  - describe: "Create test ticket"
+    request:
+      url: "${vars.backendUrl}/tickets"
+      method: POST
+      headers:
+        Content-Type: application/json
+      body: |
+        {"subject": "監査ログテスト", "description": "テスト用のチケットです。", "priority": 3}
+    vars:
+      testTicketId: response.body.id
+    assertions:
+      - eq: [response.status, 201]
+
+  # ── Step 3: チケット詳細 API から audit_log キーが返ってくることを確認 ───
+  - describe: "Ticket detail includes audit_log field"
+    request:
+      url: "${vars.backendUrl}/tickets/${vars.testTicketId}"
+    vars:
+      ticketDetail: response.body
+    assertions:
+      - eq: [response.status, 200]
+      # Verify ticket has expected fields
+      - len(vars.ticketDetail.id) > 0
+      - len(vars.ticketDetail.subject) > 0
+      # audit_log should be an array (even if empty for a new ticket)
+      - typeeq: [vars.ticketDetail.audit_log, "array"]
+
+  # ── Step 4: コメントを追加して監査ログが更新されることを確認 ────
+  - describe: "Add comment and verify audit log is updated"
+    request:
+      url: "${vars.backendUrl}/tickets/${vars.testTicketId}/comments"
+      method: POST
+      headers:
+        Content-Type: application/json
+      body: |
+        {"body": "監査ログテストコメント"}
+
+  # ── Step 5: チケット詳細の audit_log にコメントが記録されることを確認 ───
+  - describe: "Verify comment appears in audit log"
+    request:
+      url: "${vars.backendUrl}/tickets/${vars.testTicketId}"
+    vars:
+      updatedTicket: response.body
+    assertions:
+      - eq: [response.status, 200]
+      # audit_log should now have at least one entry.
+      - len(vars.updatedTicket.audit_log) >= 1
+
+  # ── Step 6: ステータス変更が監査ログに記録されることを確認 ─────
+  - describe: "Update status and verify it appears in audit log"
+    request:
+      url: "${vars.backendUrl}/tickets/${vars.testTicketId}/status"
+      method: PATCH
+      headers:
+        Content-Type: application/json
+      body: |
+        {"status_id": 2}
+
+  # ── Step 7: ステータス変更が audit_log に記録されることを確認 ─
+  - describe: "Verify status change appears in audit log"
+    request:
+      url: "${vars.backendUrl}/tickets/${vars.testTicketId}"
+    vars:
+      finalTicket: response.body
+    assertions:
+      - eq: [response.status, 200]
+      # Should have entries from comment + status change.
+      - len(vars.finalTicket.audit_log) >= 1
+

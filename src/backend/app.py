@@ -178,6 +178,93 @@ def _journals_to_notes(journals: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     return notes
 
 
+# Field name mapping for audit log display.
+_FIELD_NAME_MAP: Dict[str, str] = {
+    "tracker": "トラッカー",
+    "status": "ステータス",
+    "priority": "優先度",
+    "category": "カテゴリ",
+    "assigned_to": "担当者",
+    "subject": "件名",
+    "description": "説明",
+    "done_ratio": "進捗率",
+    "estimated_hours": "見積もり時間",
+    "spent_hours": "実費時間",
+    "due_date": "期日",
+}
+
+
+def _field_display_name(field: str) -> str:
+    """Map Redmine field name to display label."""
+    # Remove trailing _id for user-friendly names.
+    clean = field.rstrip("_id") if field.endswith("_id") else field
+    return _FIELD_NAME_MAP.get(clean, field)
+
+
+def _journals_to_audit(journals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert Redmine journals to audit log entries.
+
+    Each journal entry becomes a dict with:
+      type  : "comment" | "change" | "both"
+      author: user name
+      created_on: timestamp
+      comment: text (if any)
+      changes: list of field change dicts (if any)
+    """
+    entries: List[Dict[str, Any]] = []
+    for j in journals:
+        body = j.get("notes", "")
+        details = j.get("details", [])
+        author_obj = j.get("user")
+        author_name = ""
+        if isinstance(author_obj, dict):
+            author_name = author_obj.get("name", "")
+        elif isinstance(author_obj, str):
+            author_name = author_obj
+
+        entry: Dict[str, Any] = {
+            "author": author_name,
+            "created_on": j.get("created_on", ""),
+        }
+
+        has_comment = bool(body)
+        has_changes = len(details) > 0
+
+        if has_comment and has_changes:
+            entry["type"] = "both"
+            entry["comment"] = body
+            entry["changes"] = [
+                {
+                    "field": d.get("prop_key", ""),
+                    "display_field": _field_display_name(d.get("prop_key", "")),
+                    "old_value": d.get("old_value"),
+                    "new_value": d.get("new_value"),
+                }
+                for d in details
+            ]
+        elif has_comment:
+            entry["type"] = "comment"
+            entry["comment"] = body
+            entry["changes"] = []
+        elif has_changes:
+            entry["type"] = "change"
+            entry["changes"] = [
+                {
+                    "field": d.get("prop_key", ""),
+                    "display_field": _field_display_name(d.get("prop_key", "")),
+                    "old_value": d.get("old_value"),
+                    "new_value": d.get("new_value"),
+                }
+                for d in details
+            ]
+        else:
+            # Journal with no notes and no details -- skip it.
+            continue
+
+        entries.append(entry)
+    return entries
+
+
 def _resolve_status_id(status_key: str) -> Optional[int]:
     """Resolve an English status filter key to a Redmine status ID."""
     sid = _status_by_key.get(status_key.lower())
@@ -298,6 +385,9 @@ async def get_ticket(ticket_id: int):
                 return JSONResponse(status_code=r.status_code, content={"detail": r.text})
             i = r.json()["issue"]
             data = _issue_to_dict(i)
+            # Full audit log with comments + field changes.
+            data["audit_log"] = _journals_to_audit(i.get("journals", []))
+            # Also provide backward-compatible notes list.
             data["notes"] = _journals_to_notes(i.get("journals", []))
             return data
 

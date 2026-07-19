@@ -4,6 +4,7 @@ clients:
 include:
   - tests/init_test.yaml
   - tests/pagination_test.yaml
+  - tests/audit_test.yaml
 
 default:
   retryInterval: 1s

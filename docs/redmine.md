@@ -158,3 +158,77 @@ runn tests/init_test.yaml       # Redmine 初期化テスト
 runn tests/pagination_test.yaml # ページネーションテスト
 runn                           # .runn.yaml に定義された全テスト実行
 ```
+
+## 監査ログ機能
+
+### API 仕様
+
+`GET /tickets/{id}` のレスポンスに `audit_log` フィールドが含まれます：
+
+```json
+{
+  "id": 123,
+  "subject": "テスト",
+  "description": "...",
+  "audit_log": [
+    {
+      "type": "comment",
+      "author": "admin",
+      "created_on": "2024-01-01T00:00:00Z",
+      "comment": "初期コメント",
+      "changes": []
+    },
+    {
+      "type": "change",
+      "author": "admin",
+      "created_on": "2024-01-01T00:05:00Z",
+      "changes": [
+        {
+          "field": "status_id",
+          "display_field": "ステータス",
+          "old_value": "New",
+          "new_value": "In Progress"
+        }
+      ]
+    },
+    {
+      "type": "both",
+      "author": "user",
+      "created_on": "2024-01-02T10:00:00Z",
+      "comment": "ステータス変更とコメント同時",
+      "changes": [
+        {
+          "field": "priority_id",
+          "display_field": "優先度",
+          "old_value": "Low",
+          "new_value": "High"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### フィールド名マッピング
+
+Backend は Redmine の `prop_key` を日本語ラベルに変換します：
+
+| prop_key | 表示ラベル |
+|----------|-----------|
+| tracker_id | タッカー |
+| status_id | ステータス |
+| priority_id | 優先度 |
+| assigned_to_id | 担当者 |
+| subject | 件名 |
+| description | 説明 |
+
+### 監査ログの表示
+
+フロントエンドでは `AuditLog` コンポーネントがタイムライン形式で履歴を表示します：
+
+- 💬 青色ドット: コメント追加
+- 🔄 オレンジ色ドット: フィールド変更
+- テーブル形式でフィールド変更の一覧（変更前/変更後）
+
+
+echo "Redmine docs updated with audit log documentation"

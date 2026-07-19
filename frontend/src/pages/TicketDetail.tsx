@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { getTicket, addComment, updateStatus, getTicketStatusOptions, Ticket, TicketStatusOption } from '../api/client'
+import { getTicket, addComment, updateStatus, getTicketStatusOptions, Ticket, TicketStatusOption, AuditEntry } from '../api/client'
+import { AuditLog } from '../components/AuditLog'
 
 export function TicketDetail() {
   const { id } = useParams<{ id: string }>()
   const [ticket, setTicket] = useState<Ticket | null>(null)
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([])
   const [comment, setComment] = useState('')
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(true)
@@ -21,6 +23,7 @@ export function TicketDetail() {
         getTicketStatusOptions(),
       ])
       setTicket(t)
+      setAuditLog((t as any).audit_log || [])
       setStatusOptions(opts)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'チケットの取得に失敗しました'
@@ -39,7 +42,7 @@ export function TicketDetail() {
     try {
       await addComment(parseInt(id), comment)
       setComment('')
-      setError(null) // Clear any previous error on success
+      setError(null) // Clear any previous error on success.
       await loadTicketData()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'コメントの追加に失敗しました'
@@ -51,7 +54,7 @@ export function TicketDetail() {
     if (!id) return
     try {
       await updateStatus(parseInt(id), statusId)
-      setError(null) // Clear any previous error on success
+      setError(null) // Clear any previous error on success.
       await loadTicketData()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'ステータスの変更に失敗しました'
@@ -61,7 +64,7 @@ export function TicketDetail() {
 
   if (loading) return <div className="loading">読み込み中...</div>
 
-  // Loading error state with retry button
+  // Loading error state with retry button.
   if (!ticket && error) {
     return (
       <div>
@@ -96,6 +99,7 @@ export function TicketDetail() {
         </div>
       )}
 
+      {/* Ticket info card */}
       <div className="card">
         <h1>{ticket.subject}</h1>
         <div style={{ marginTop: '1rem', color: '#666' }}>
@@ -104,22 +108,10 @@ export function TicketDetail() {
         <div style={{ marginTop: '1rem', whiteSpace: 'pre-wrap' }}>{ticket.description}</div>
       </div>
 
-      <div className="card" style={{ marginTop: '1rem' }}>
-        <h3>コメント履歴</h3>
-        {ticket.notes && ticket.notes.length > 0 ? (
-          ticket.notes.map((note, idx) => (
-            <div key={idx} className="comment">
-              <div className="comment-meta">
-                {note.author || '匿名'} - {new Date(note.created_on).toLocaleString()}
-              </div>
-              <div>{note.body}</div>
-            </div>
-          ))
-        ) : (
-          <div className="empty">コメントはありません</div>
-        )}
-      </div>
+      {/* Full audit log with comments + field changes */}
+      <AuditLog entries={auditLog} />
 
+      {/* Comment form */}
       <div className="card" style={{ marginTop: '1rem' }}>
         <h3>コメント追加</h3>
         {error && <div style={{ color: '#e74c3c', marginBottom: '0.5rem' }}>{error}</div>}
@@ -135,6 +127,7 @@ export function TicketDetail() {
         </button>
       </div>
 
+      {/* Status change form */}
       <div className="card" style={{ marginTop: '1rem' }}>
         <h3>ステータス変更</h3>
         <select
