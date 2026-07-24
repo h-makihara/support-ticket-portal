@@ -58,6 +58,7 @@ export interface Ticket {
   created_on?: string
   updated_on?: string
   notes?: Array<{ body: string; author: string; created_on: string }>
+  audit_log?: AuditEntry[]
 }
 
 export interface PaginationInfo {

@@ -14,6 +14,12 @@ def test_session_requires_cookie(client: TestClient):
     assert response.status_code == 401
 
 
+def test_health_response_does_not_expose_configuration(client: TestClient):
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "healthy"}
+
+
 def test_current_session_does_not_expose_api_key(client: TestClient):
     response = client.get("/auth/session")
     assert response.status_code == 200

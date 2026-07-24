@@ -37,6 +37,13 @@ class TestCreateTicket:
         resp = client.post("/tickets", json=payload)
         assert resp.status_code == 422
 
+    def test_create_ticket_rejects_whitespace_only_fields(self, client: TestClient):
+        resp = client.post(
+            "/tickets",
+            json={"subject": "  ", "description": "\n\t"},
+        )
+        assert resp.status_code == 422
+
     def test_create_ticket_with_tracker_id(self, client: TestClient):
         """正常系: tracker_id を指定して作成"""
         payload = {
@@ -169,6 +176,10 @@ class TestAddComment:
     def test_add_comment_empty_body(self, client: TestClient):
         """異常系: body が空だと422エラー"""
         resp = client.post("/tickets/100/comments", json={"body": ""})
+        assert resp.status_code == 422
+
+    def test_add_comment_whitespace_only_body(self, client: TestClient):
+        resp = client.post("/tickets/100/comments", json={"body": " \n\t "})
         assert resp.status_code == 422
 
 

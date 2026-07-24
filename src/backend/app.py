@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
+import logging
 import os
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -20,6 +21,21 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from src.backend.auth import SessionData, SessionStore, authenticate_with_redmine
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await _fetch_statuses()
+    logger.info(
+        "Backend started for Redmine project %s with %d status mappings",
+        REDMINE_PROJECT_ID,
+        len(_status_by_key),
+    )
+    yield
+    await session_store.close()
+
 
 # ── OpenTelemetry setup ─────────────────────────────────────────────
 
@@ -38,7 +54,7 @@ trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(span_exporter)
 
 # ── App ─────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Redmine Ticket Portal API")
+app = FastAPI(title="Redmine Ticket Portal API", lifespan=lifespan)
 
 # CORS - explicit origins (no "*" + credentials=True conflict)
 cors_origins = [
@@ -65,10 +81,10 @@ HTTPXClientInstrumentor().instrument()
 REDMINE_BASE_URL = os.getenv("REDMINE_BASE_URL", "http://redmine:3000")
 REDMINE_API_KEY = os.getenv("REDMINE_API_KEY", "")
 REDMINE_PROJECT_ID = os.getenv("REDMINE_PROJECT_ID", "")
-REDMINE_TRACKER_ID = os.getenv("REDMINE_TRACKER_ID", "3")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "session_id")
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "true").lower() in ("1", "true", "yes")
+SESSION_MAX_AGE_SECONDS = 21_600
 
 if not REDMINE_API_KEY:
     raise RuntimeError("REDMINE_API_KEY must be set")
@@ -81,7 +97,6 @@ session_store = SessionStore(REDIS_URL)
 # ── Status cache ────────────────────────────────────────────────────
 # Populated at startup by querying Redmine's /issue_statuses.json.
 # _status_by_name:  Redmine status name  -> int id
-# _status_by_id:    int id              -> Redmine status name
 # _status_by_id:    int id              -> Redmine status name
 # _status_by_key:   English filter key  -> int id
 _status_by_name: Dict[str, int] = {}
@@ -155,37 +170,23 @@ async def _fetch_statuses() -> None:
                     if slug and slug in _ENGLISH_KEY_MATCHERS:
                         _status_by_key[slug] = sid
 
-            print(f"[INFO] Loaded {len(_status_by_id)} statuses from Redmine (attempt {attempt})")
+            logger.info(
+                "Loaded %d statuses from Redmine (attempt %d)",
+                len(_status_by_id),
+                attempt,
+            )
             return  # Success!
 
-        except Exception as e:
-            print(f"[WARN] Failed to fetch statuses (attempt {attempt}/3): {e}")
+        except (httpx.HTTPError, RuntimeError, ValueError, KeyError) as exc:
+            logger.warning(
+                "Failed to fetch statuses (attempt %d/3): %s", attempt, exc
+            )
 
     # All retries failed -- use defaults.
-    print(f"[WARN] Using default fallback mapping: {_DEFAULT_KEY_FALLBACK}")
+    logger.warning("Using default fallback status mapping")
     _status_by_key.update(_DEFAULT_KEY_FALLBACK)
     for key, sid in _DEFAULT_KEY_FALLBACK.items():
         _status_by_id[sid] = key
-
-
-@app.on_event("startup")
-async def startup():
-    print(f"[STARTUP] Backend starting...")
-    print(f"[STARTUP] REDMINE_BASE_URL={REDMINE_BASE_URL}")
-    print(f"[STARTUP] REDMINE_PROJECT_ID={REDMINE_PROJECT_ID}")
-    print(f"[STARTUP] REDMINE_API_KEY={'SET' if REDMINE_API_KEY else 'NOT SET'}")
-
-    await _fetch_statuses()
-    print(f"[INFO] Loaded statuses by name: {_status_by_name}")
-    print(f"[INFO] Loaded status key map:   {_status_by_key}")
-    print(f"[INFO] Loaded status ID→name:  {_status_by_id}")
-
-    print(f"[INFO] Loaded status key map: {_status_by_key}")
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    await session_store.close()
 
 
 def _client(api_key: str) -> httpx.AsyncClient:
@@ -273,7 +274,7 @@ _FIELD_NAME_MAP: Dict[str, str] = {
 def _field_display_name(field: str) -> str:
     """Map Redmine field name to display label."""
     # Remove trailing _id for user-friendly names.
-    clean = field.rstrip("_id") if field.endswith("_id") else field
+    clean = field.removesuffix("_id")
     return _FIELD_NAME_MAP.get(clean, field)
 
 
@@ -493,7 +494,7 @@ async def login(
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=session_id,
-        max_age=21_600,
+        max_age=SESSION_MAX_AGE_SECONDS,
         httponly=True,
         secure=SESSION_COOKIE_SECURE,
         samesite="lax",
@@ -538,41 +539,17 @@ async def logout(
     )
     return {"detail": "Logged out"}
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all exception handler for debugging."""
-    import traceback
-    print(f"[ERROR] Unhandled exception at {request.url.path}")
-    traceback.print_exc()
-
-    return JSONResponse(
-        status_code=500,
-        content={"detail": str(exc), "type": type(exc).__name__},
-    )
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for debugging."""
-    return {
-        "status": "healthy",
-        "redmine_url": REDMINE_BASE_URL,
-        "project_id": REDMINE_PROJECT_ID,
-        "api_key_set": bool(REDMINE_API_KEY),
-    }
-
 @app.post("/tickets")
 async def create_ticket(
     ticket_data: CreateTicketRequest,
     session: SessionData = Depends(require_session),
 ):
     with tracer.start_as_current_span("create_ticket") as span:
-        raw = ticket_data.dict()
-        span.set_attribute("request.subject", raw.get("subject"))
-
-        subject = raw.get("subject")
-        description = raw.get("description")
-        priority = raw.get("priority")
-        tracker_id = raw.get("tracker_id")
+        subject = ticket_data.subject.strip()
+        description = ticket_data.description.strip()
+        priority = ticket_data.priority
+        tracker_id = ticket_data.tracker_id
+        span.set_attribute("request.subject", subject)
 
         if not subject or not description:
             return JSONResponse(
@@ -599,21 +576,9 @@ async def create_ticket(
                 return JSONResponse(status_code=r.status_code, content={"detail": r.text})
             issue = r.json()["issue"]
             result = _issue_to_dict(issue)
-            print(f"[DEBUG] Created ticket: {result['id']}")
+            logger.info("Created ticket %s", result["id"])
             return result
 
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all exception handler for debugging."""
-    import traceback
-    print(f"[ERROR] Unhandled exception at {request.url.path}")
-    traceback.print_exc()
-
-    return JSONResponse(
-        status_code=500,
-        content={"detail": str(exc), "type": type(exc).__name__},
-    )
 
 @app.get("/tickets")
 async def list_tickets(
@@ -650,7 +615,7 @@ async def list_tickets(
             if sid is not None:
                 params["status_id"] = sid
             else:
-                print(f"[WARN] Unknown status filter '{status_key}', no mapping in {_status_by_key}")
+                logger.warning("Unknown status filter %r", status_key)
 
         # Responder filtering happens after fetching because Redmine cannot
         # filter assignees by project role.
@@ -712,18 +677,6 @@ async def list_tickets(
             }
 
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all exception handler for debugging."""
-    import traceback
-    print(f"[ERROR] Unhandled exception at {request.url.path}")
-    traceback.print_exc()
-
-    return JSONResponse(
-        status_code=500,
-        content={"detail": str(exc), "type": type(exc).__name__},
-    )
-
 @app.get("/tickets/{ticket_id}")
 async def get_ticket(ticket_id: int, session: SessionData = Depends(require_session)):
     with tracer.start_as_current_span("get_ticket") as span:
@@ -758,28 +711,6 @@ async def get_ticket(ticket_id: int, session: SessionData = Depends(require_sess
 class AddCommentRequest(BaseModel):
     body: str
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all exception handler for debugging."""
-    import traceback
-    print(f"[ERROR] Unhandled exception at {request.url.path}")
-    traceback.print_exc()
-
-    return JSONResponse(
-        status_code=500,
-        content={"detail": str(exc), "type": type(exc).__name__},
-    )
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for debugging."""
-    return {
-        "status": "healthy",
-        "redmine_url": REDMINE_BASE_URL,
-        "project_id": REDMINE_PROJECT_ID,
-        "api_key_set": bool(REDMINE_API_KEY),
-    }
-
 @app.post("/tickets/{ticket_id}/comments")
 async def add_comment(
     ticket_id: int,
@@ -788,8 +719,7 @@ async def add_comment(
 ):
     with tracer.start_as_current_span("add_comment") as span:
         span.set_attribute("ticket.id", ticket_id)
-        raw = comment_data.dict()
-        body = raw.get("body", "")
+        body = comment_data.body.strip()
         if not body:
             return JSONResponse(status_code=422, content={"detail": "body is required"})
         payload = {"issue": {"notes": body}}
@@ -868,8 +798,7 @@ async def update_status(
 ):
     with tracer.start_as_current_span("update_status") as span:
         span.set_attribute("ticket.id", ticket_id)
-        raw = status_data.dict()
-        status_value = raw.get("status_id", "")
+        status_value = status_data.status_id
         if not status_value:
             return JSONResponse(status_code=422, content={"detail": "status_id is required"})
 
@@ -931,18 +860,6 @@ async def update_status(
             return {"detail": "Status updated"}
 
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all exception handler for debugging."""
-    import traceback
-    print(f"[ERROR] Unhandled exception at {request.url.path}")
-    traceback.print_exc()
-
-    return JSONResponse(
-        status_code=500,
-        content={"detail": str(exc), "type": type(exc).__name__},
-    )
-
 @app.get("/status/options")
 async def status_options(session: SessionData = Depends(require_session)):
     """Return all Redmine issue statuses for frontend dropdowns."""
@@ -973,3 +890,19 @@ async def status_options(session: SessionData = Depends(require_session)):
     for sid, name in sorted(_status_by_id.items()):
         result.append({"id": sid, "label": name})
     return result
+
+
+@app.get("/health")
+async def health_check():
+    """Return a minimal liveness response without exposing configuration."""
+    return {"status": "healthy"}
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Log unexpected failures while returning a stable public response."""
+    logger.exception("Unhandled exception at %s", request.url.path, exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )

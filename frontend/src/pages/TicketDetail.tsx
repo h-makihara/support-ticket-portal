@@ -23,7 +23,7 @@ export function TicketDetail() {
         getTicketStatusOptions(),
       ])
       setTicket(t)
-      setAuditLog((t as any).audit_log || [])
+      setAuditLog(t.audit_log ?? [])
       const options = opts.length > 0
         ? opts
         : [{ id: 0, label: t.status }]

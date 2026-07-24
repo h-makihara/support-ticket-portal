@@ -1,234 +1,82 @@
-# Redmine 環境
+# Redmine 設定とワークフロー
 
-## バージョン
+## 前提
 
-- Redmine 6.1.x（最新安定版）
-- PostgreSQL 15 (Docker)
+- Docker image: `redmine:6.1`
+- Database: PostgreSQL 15
+- REST API を有効化
+- 固定プロジェクト: `internal-inquiry`（社内問い合わせ）
+- トラッカー: `問い合わせ`
 
-## Docker Compose
-
-Minimal Docker Compose configuration is provided in the repository root
-(`docker-compose.yml`). Running the stack will start Redmine (v6.1) backed by a
-PostgreSQL database.
-
-```bash
-docker compose up -d postgres redmine backend frontend tempo
-```
-
-After the containers are up, Redmine will be accessible at `http://localhost:3000`.
-The stack is pre‑configured with:
-
-* **Default user** – `admin / admin`
-* **API key** – obtained automatically via the initialization script.
-
-## 初期化スクリプト
-
-プロジェクトのセットアップを自動で行うスクリプトが用意されています。
+## 初期化
 
 ```bash
-# 全手順 (docker起動 → Redmine初期化 → Backend/Frontend起動)
-./scripts/init.sh
-
-# Redmine API のみ（既に Docker が動いている場合）
+docker compose up -d postgres redmine
 python3 scripts/init_redmine.py
 ```
 
-### 環境変数（デフォルト値含む）
+初期化処理は冪等で、既存リソースを確認して不足分のみを設定します。トラッカーは Redmine REST API から新規作成できないため、存在しない場合は Redmine 管理画面で作成してから再実行します。
 
-| 変数名 | デフォルト | 説明 |
-|-------|-----------|------|
-| `REDMINE_URL` | `http://localhost:3000` | Redmine の URL |
-| `ADMIN_USER` | `admin` | Redmine admin ユーザー名 |
-| `ADMIN_PASS` | `admin` | Redmine admin パスワード |
+`scripts/bootstrap_redmine.rb` は Docker 環境内で、REST API の有効化、ロール・ワークフロー、必要に応じた検証ユーザーの準備に利用されます。
 
-スクリプトの実行後、`.env` ファイルに API Key / プロジェクト ID が自動的に書き出されます。
+## ステータス
 
-## セットアップされるリソース
+Redmine 6.1 の標準ステータスを、ポータルでは次の業務ラベルとして扱います。
 
-初期化スクリプトは以下を自動作成します（冪等性あり — 既存ならスキップ）：
+| ID | Redmine 標準名 | ポータルのラベル | API フィルター |
+|---:|---|---|---|
+| 1 | New | 新規 | `open` |
+| 2 | In Progress | 対応中 | `in_progress` |
+| 3 | Resolved | 回答済 | `answered` |
+| 4 | Feedback | 追加質問 | `additional_question` |
+| 5 | Closed | クローズ | `closed` |
+| 6 | Rejected | クローズ待ち | `pending_close` |
 
-| リソース | 名前/識別子 | 説明 |
-|---------|-----------|------|
-| プロジェクト | `internal-inquiry` / 「社内問い合わせ」 | チケット管理用プロジェクト |
-| トラッカー | `問い合わせ` | 営業→サポートの問い合わせ |
-| ステータス | Redmine デフォルト利用（下記参照） | |
-| ロール | `営業担当者` | チケット作成・確認・クローズ権限 |
-| ロール | `サポート担当者` | 回答・ステータス更新権限 |
+既存環境の `Reopened` も追加質問として認識します。Backend は起動時に `/issue_statuses.json` を取得し、名前または slug から ID を解決します。Redmine が一時的に応答しない場合は標準 ID をフォールバックとして使用します。
 
-## ステータス定義
+## 基本フロー
 
-Redmine デフォルトの 4 つのステータスをそのまま使用し、フロントエンド/バックエンド側で以下のように解釈します：
-
-| Redmine デフォルト ID | Redmine Status | 英語キー | 役割 |
-|---|---|---|---|
-| 1 | New | `open` | 新規受付（営業作成直後） |
-| 2 | In Progress | `in_progress` | サポート対応中・技術確認中 |
-| 3 | Reopened | `feedback` | 追加質問 / フィードバック待ち |
-| 4 | Closed | `closed` | 完了・クローズ |
-
-### ステータス遷移イメージ
-
+```text
+新規
+  └─ 自分が対応する → 対応中
+       └─ 回答 → 回答済
+            ├─ 完了 → クローズ
+            └─ 追加質問 → 追加質問（担当解除）
+                 └─ 自分が対応する → 対応中
 ```
-[新規] ──作成──→ [open]
-                    │
-                 (サポート対応)
-                    ↓
-               [in_progress]
-                    │
-              (回答完了/フィードバック)
-                    ↓
-              [feedback / Reopened]
-                    │
-            ┌───────┴────────┐
-          営業確認        追加質問あり
-             ↓                ↓
-         [closed] ←── [feedback loop ...]
-```
+
+「自分が対応する」はログインユーザーを担当者に設定し、同時に「対応中」へ変更します。「追加質問」へ変更すると担当者を解除し、回答者の共有キューへ戻します。実際に許可される遷移は Redmine のロール別ワークフローに従います。
+
+## ロール
+
+| ロール | 主な操作 |
+|---|---|
+| 営業担当者 | 作成、閲覧、コメント、許可されたステータス変更 |
+| サポート担当者 | 閲覧、担当引受、コメント、ステータス変更 |
+
+回答者向け一覧には、未完了かつ未割り当て、または `サポート担当者` ロールのユーザーに割り当てられたチケットを表示します。
 
 ## API キー
 
-- Redmine REST API は `X-Redmine-API-Key` ヘッダーで認証。
-- 初期化スクリプト実行時に自動取得・`.env` に保存されます。
+- Backend の起動時キャッシュやメンバー取得には `.env` の管理用 `REDMINE_API_KEY` を使用します。
+- 利用者のチケット操作には、ログイン時に Redmine から取得して Redis セッションへ保存した利用者自身の API キーを使用します。
+- API キーをブラウザーへ返したり、ログへ出力したりしないでください。
 
-## テスト
+## 監査ログ
 
-runn を使用して、初期化の正しさを確認できます：
+`GET /tickets/{id}` は Redmine journals を次の2形式へ変換します。
 
-```bash
-# Docker compose が動いている状態で
-runn -e REDMINE_URL=http://localhost:3000 tests/init_test.yaml
-```
+- `audit_log`: コメントと項目変更を時系列表示する現行形式
+- `notes`: コメントだけを返す後方互換形式
 
-### テスト内容
-
-| Step | 検証項目 |
-|------|---------|
-| 1 | Redmine の HTTP レスポンス確認 |
-| 2 | admin アカウントで API Key が取得できる |
-| 3 | プロジェクト `internal-inquiry` が存在する |
-| 4 | トラッカー `問い合わせ` が存在する |
-| 5 | デフォルトステータス (New/In Progress/Reopened/Closed) が存在する |
-| 6 | カスタムロール「営業担当者」「サポート担当者」が作成されている |
-| 7 | Backend API `/status/options` が動作する |
-| 8 | チケット一覧 API `/tickets` が正常に応答する |
-
-## 参照
-
-- [Redmine API ドキュメント](https://www.redmine.org/projects/redmine/wiki/Rest_api)
+担当者 ID とステータス ID は、取得できたプロジェクトメンバー名・ステータス名へ変換します。
 
 ## ページネーション
 
-Backend API は `GET /tickets` でページネーションをサポートしています：
+`GET /tickets` は `limit`（1〜1000）と `offset`（0以上）を受け取ります。回答者向け一覧は Redmine 側でロールによる担当者絞り込みができないため、最大1000件を取得してから Backend で絞り込みとページ分割を行います。
 
-| パラメータ | 説明 | デフォルト | 最大値 |
-|-----------|------|----------|--------|
-| `limit` | 1ページの件数 | 100 | 1000 |
-| `offset` | スキップ件数 | 0 | - |
+## 結合テスト
 
-レスポンス例:
-```json
-{
-  "tickets": [ ... ],
-  "pagination": {
-    "limit": 20,
-    "offset": 0,
-    "total_count": 150,
-    "has_more": true
-  }
-}
-```
+Docker Compose 一式を起動後、リポジトリルートで `runn` を実行します。個別シナリオは `tests/*.yaml` にあります。
 
-## エラーハンドリング
-
-フロントエンドは以下のようにエラーを処理します：
-
-| エラースコープ | 表示方法 | アクション |
-|---------------|---------|-----------|
-| API接続不良 | 赤字バナー + 再試行ボタン | リトライ可能 |
-| フォーム検証失敗 | インラインメッセージ | 入力修正 |
-| 処理中 | ローディングインジケータ | 待機 |
-
-## テスト
-
-runn を使用して、初期化の正しさとページネーションの動作を確認できます：
-
-```bash
-# Docker compose が動いている状態で
-runn tests/init_test.yaml       # Redmine 初期化テスト
-runn tests/pagination_test.yaml # ページネーションテスト
-runn                           # .runn.yaml に定義された全テスト実行
-```
-
-## 監査ログ機能
-
-### API 仕様
-
-`GET /tickets/{id}` のレスポンスに `audit_log` フィールドが含まれます：
-
-```json
-{
-  "id": 123,
-  "subject": "テスト",
-  "description": "...",
-  "audit_log": [
-    {
-      "type": "comment",
-      "author": "admin",
-      "created_on": "2024-01-01T00:00:00Z",
-      "comment": "初期コメント",
-      "changes": []
-    },
-    {
-      "type": "change",
-      "author": "admin",
-      "created_on": "2024-01-01T00:05:00Z",
-      "changes": [
-        {
-          "field": "status_id",
-          "display_field": "ステータス",
-          "old_value": "New",
-          "new_value": "In Progress"
-        }
-      ]
-    },
-    {
-      "type": "both",
-      "author": "user",
-      "created_on": "2024-01-02T10:00:00Z",
-      "comment": "ステータス変更とコメント同時",
-      "changes": [
-        {
-          "field": "priority_id",
-          "display_field": "優先度",
-          "old_value": "Low",
-          "new_value": "High"
-        }
-      ]
-    }
-  ]
-}
-```
-
-### フィールド名マッピング
-
-Backend は Redmine の `prop_key` を日本語ラベルに変換します：
-
-| prop_key | 表示ラベル |
-|----------|-----------|
-| tracker_id | タッカー |
-| status_id | ステータス |
-| priority_id | 優先度 |
-| assigned_to_id | 担当者 |
-| subject | 件名 |
-| description | 説明 |
-
-### 監査ログの表示
-
-フロントエンドでは `AuditLog` コンポーネントがタイムライン形式で履歴を表示します：
-
-- 💬 青色ドット: コメント追加
-- 🔄 オレンジ色ドット: フィールド変更
-- テーブル形式でフィールド変更の一覧（変更前/変更後）
-
-
-echo "Redmine docs updated with audit log documentation"
+参考: [Redmine REST API](https://www.redmine.org/projects/redmine/wiki/Rest_api)
