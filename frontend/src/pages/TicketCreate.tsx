@@ -3,17 +3,18 @@ import { useNavigate, Link } from 'react-router-dom'
 import { createTicket } from '../api/client'
 
 const PRIORITY_OPTIONS = [
-  { id: 1, label: '最優先' },
-  { id: 2, label: '高' },
-  { id: 3, label: '中' },
-  { id: 4, label: '低' },
+  { id: 1, label: '低' },
+  { id: 2, label: '通常' },
+  { id: 3, label: '高' },
+  { id: 4, label: '緊急' },
+  { id: 5, label: '最優先' },
 ]
 
 export function TicketCreate() {
   const navigate = useNavigate()
   const [subject, setSubject] = useState('')
   const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState(3)
+  const [priority, setPriority] = useState(2)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 

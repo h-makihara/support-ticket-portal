@@ -4,9 +4,11 @@ import { getTickets, Ticket, TicketListResponse } from '../api/client'
 
 const STATUS_OPTIONS = [
   { value: '', label: 'すべて' },
-  { value: 'open', label: '未回答' },
-  { value: 'in_progress', label: '回答中' },
-  { value: 'feedback', label: '回答待ち' },
+  { value: 'open', label: '新規' },
+  { value: 'in_progress', label: '対応中' },
+  { value: 'answered', label: '回答済' },
+  { value: 'additional_question', label: '追加質問' },
+  { value: 'pending_close', label: 'クローズ待ち' },
   { value: 'closed', label: 'クローズ' },
 ]
 

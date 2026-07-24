@@ -1,23 +1,29 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
-import { getTickets, Ticket, TicketListResponse } from '../api/client'
+import { Link, useNavigate } from 'react-router-dom'
+import { claimTicket, getTickets, Ticket, TicketListResponse } from '../api/client'
 
 const PAGE_SIZE = 20
 
 export function AnswerTicketList() {
+  const navigate = useNavigate()
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [loading, setLoading] = useState(true)
   const [offset, setOffset] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
   const [hasMore, setHasMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [ticketToClaim, setTicketToClaim] = useState<Ticket | null>(null)
+  const [claiming, setClaiming] = useState(false)
 
   const loadTickets = async () => {
     setLoading(true)
     setError(null)
     try {
-      // Filter for in_progress and feedback statuses (tickets needing response)
-      const resp: TicketListResponse = await getTickets({ status: 'in_progress', limit: PAGE_SIZE, offset })
+      const resp: TicketListResponse = await getTickets({
+        responderView: true,
+        limit: PAGE_SIZE,
+        offset,
+      })
       setTickets(resp.tickets)
       setTotalCount(resp.pagination.total_count)
       setHasMore(resp.pagination.has_more)
@@ -38,6 +44,22 @@ export function AnswerTicketList() {
 
   const goToPage = (page: number) => {
     setOffset(page * PAGE_SIZE)
+  }
+
+  const handleClaim = async () => {
+    if (!ticketToClaim) return
+    setClaiming(true)
+    setError(null)
+    try {
+      await claimTicket(ticketToClaim.id)
+      navigate(`/tickets/${ticketToClaim.id}`)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '担当者の割り当てに失敗しました'
+      setError(msg)
+      setTicketToClaim(null)
+    } finally {
+      setClaiming(false)
+    }
   }
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
@@ -73,6 +95,7 @@ export function AnswerTicketList() {
                 <th>件名</th>
                 <th>ステータス</th>
                 <th>優先度</th>
+                <th>対応者</th>
                 <th>作成日</th>
                 <th>操作</th>
               </tr>
@@ -90,13 +113,16 @@ export function AnswerTicketList() {
                     </span>
                   </td>
                   <td>{ticket.priority}</td>
+                  <td>{ticket.assignee?.name || '未割り当て'}</td>
                   <td>{ticket.created_on ? new Date(ticket.created_on).toLocaleDateString() : '-'}</td>
                   <td>
-                    <Link to={`/tickets/${ticket.id}`}>
-                      <button className="btn btn-primary" style={{ padding: '0.5rem 1rem' }}>
-                        対応する
-                      </button>
-                    </Link>
+                    <button
+                      className="btn btn-primary"
+                      style={{ padding: '0.5rem 1rem' }}
+                      onClick={() => setTicketToClaim(ticket)}
+                    >
+                      対応する
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -137,6 +163,43 @@ export function AnswerTicketList() {
             </div>
           )}
         </>
+      )}
+
+      {ticketToClaim && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={() => !claiming && setTicketToClaim(null)}
+        >
+          <div
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="claim-dialog-title"
+            onMouseDown={event => event.stopPropagation()}
+          >
+            <h2 id="claim-dialog-title">このチケットに対応しますか？</h2>
+            <p>
+              「{ticketToClaim.subject}」の対応者にあなたを割り当てます。
+            </p>
+            <div className="confirm-dialog-actions">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setTicketToClaim(null)}
+                disabled={claiming}
+              >
+                キャンセル
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleClaim}
+                disabled={claiming}
+              >
+                {claiming ? '割り当て中…' : '対応する'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

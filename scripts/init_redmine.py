@@ -4,8 +4,9 @@
 Redmine REST API を叩いて、以下のリソースを作成（既存ならスキップ）：
  - プロジェクト「社内問い合わせ」(internal-inquiry)
  - トラッカー「問い合わせ」
- - ステータス定義（デフォルトの 4 つをそのまま利用）
+ - ステータス定義（新規・対応中・回答済・追加質問・クローズ待ち・クローズ）
  - ロール：営業担当者・サポート担当者
+ - ロール別ワークフロー
 
 .env ファイルに API Key / プロジェクト ID を書き出す。
 """
@@ -34,13 +35,23 @@ PROJECT_IDENTIFIER = "internal-inquiry"
 PROJECT_NAME = "社内問い合わせ"
 TRACKER_NAME = "問い合わせ"
 
-# Redmine デフォルトステータスのスロット名 → 英語キー (backend が利用)
-# Redmine 6.1 default: New(1), In Progress(2), Reopened(3), Closed(4)
-DEFAULT_STATUS_KEYS = {
-    "New":        "open",
-    "In Progress":"in_progress",
-    "Reopened":   "feedback",
-    "Closed":     "closed",
+# Redmine のステータス名 → ポータルが利用する英語キー。
+# Redmine 6.1 のデフォルトは New / In Progress / Resolved / Feedback /
+# Closed / Rejected。旧構成の Reopened と日本語表示も受け入れる。
+STATUS_KEY_ALIASES = {
+    "open": {"new", "open", "新規"},
+    "in_progress": {"in progress", "in_progress", "progress", "進行中", "対応中"},
+    "answered": {"resolved", "回答済"},
+    "additional_question": {
+        "feedback",
+        "reopened",
+        "re-opened",
+        "re_opened",
+        "フィードバック",
+        "追加質問",
+    },
+    "pending_close": {"rejected", "クローズ待ち"},
+    "closed": {"closed", "終了", "クローズ"},
 }
 
 ROLES_TO_CREATE = [
@@ -52,12 +63,30 @@ ROLES_TO_CREATE = [
 # ── HTTP Helpers ───────────────────────────────────────────────────
 
 def _login(client: httpx.Client) -> str:
-    """admin でログインし API Key を取得"""
-    r = client.get("/my/account/key.json", auth=(ADMIN_USER, ADMIN_PASS))
-    if r.status_code != 200:
-        print(f"  ✗ Login failed (status={r.status_code}): {r.text[:300]}")
+    """Redmine に Basic 認証し、現在のユーザーの API Key を取得する。"""
+    r = client.get(
+        "/users/current.json",
+        auth=(ADMIN_USER, ADMIN_PASS),
+        headers={"Accept": "application/json"},
+    )
+    if r.status_code in (401, 403):
+        print("  ✗ Login failed: invalid admin credentials or password change required")
         sys.exit(1)
-    return r.json()["api_key"]
+    if r.status_code == 404:
+        print("  ✗ Login failed: Redmine REST API is disabled or unavailable")
+        print("    Enable 'REST web service' in Redmine Administration > Settings > API")
+        sys.exit(1)
+    if r.status_code != 200:
+        print(f"  ✗ Login failed (status={r.status_code})")
+        sys.exit(1)
+
+    try:
+        api_key = r.json()["user"]["api_key"]
+    except (KeyError, TypeError, ValueError):
+        print("  ✗ Login succeeded, but Redmine did not return the user's API key")
+        print("    Confirm that REST API access is enabled for this Redmine instance")
+        sys.exit(1)
+    return api_key
 
 
 def _get(client: httpx.Client, path: str, api_key: str, params: Optional[Dict] = None):
@@ -123,18 +152,16 @@ def ensure_project(client: httpx.Client, api_key: str) -> int:
 
 
 def ensure_tracker(client: httpx.Client, api_key: str) -> int:
-    """トラッカーがなければ作成。"""
+    """Rails bootstrap で作成されたトラッカーの存在を確認する。"""
     trackers = _get(client, "trackers", api_key)
     for t in trackers.get("trackers", []):
         if t["name"] == TRACKER_NAME:
             print(f"  ✓ Tracker '{TRACKER_NAME}' (ID={t['id']}) already exists")
             return t["id"]
 
-    payload = {"tracker": {"name": TRACKER_NAME}}
-    result = _post(client, "trackers", api_key, payload)
-    tid = result["tracker"]["id"]
-    print(f"  ✓ Created tracker '{TRACKER_NAME}' (ID={tid})")
-    return tid
+    print(f"  ✗ Tracker '{TRACKER_NAME}' does not exist")
+    print("    Run the redmine-init service to provision administration resources")
+    sys.exit(1)
 
 
 def check_statuses(client: httpx.Client, api_key: str) -> Dict[str, int]:
@@ -147,14 +174,32 @@ def check_statuses(client: httpx.Client, api_key: str) -> Dict[str, int]:
     for s in status_list:
         name = s["name"]
         sid = s["id"]
-        key = DEFAULT_STATUS_KEYS.get(name)
+        normalized_names = {
+            name.strip().casefold(),
+            str(s.get("slug", "")).strip().casefold(),
+        }
+        key = next(
+            (
+                candidate
+                for candidate, aliases in STATUS_KEY_ALIASES.items()
+                if normalized_names & aliases
+            ),
+            None,
+        )
         if key:
             mapping[key] = sid
             print(f"    ID={sid} '{name}' → {key}")
         else:
             print(f"    ID={sid} '{name}' (unknown — ignored)")
 
-    required_keys = {"open", "in_progress", "feedback", "closed"}
+    required_keys = {
+        "open",
+        "in_progress",
+        "answered",
+        "additional_question",
+        "pending_close",
+        "closed",
+    }
     if not required_keys.issubset(mapping.keys()):
         missing = required_keys - mapping.keys()
         print(f"  ✗ Missing status keys: {missing}")
@@ -165,22 +210,17 @@ def check_statuses(client: httpx.Client, api_key: str) -> Dict[str, int]:
 
 
 def ensure_roles(client: httpx.Client, api_key: str):
-    """カスタムロールがなければ作成。"""
+    """Rails bootstrap で作成されたカスタムロールの存在を確認する。"""
     roles = _get(client, "roles", api_key)
     existing_names = {r["name"] for r in roles.get("roles", [])}
 
+    missing = [rc["name"] for rc in ROLES_TO_CREATE if rc["name"] not in existing_names]
+    if missing:
+        print(f"  ✗ Missing roles: {', '.join(missing)}")
+        print("    Run the redmine-init service to provision administration resources")
+        sys.exit(1)
     for rc in ROLES_TO_CREATE:
-        name = rc["name"]
-        if name in existing_names:
-            print(f"  ✓ Role '{name}' already exists")
-            continue
-
-        payload = {"role": {
-            "name": name,
-            "description": rc["description"],
-        }}
-        _post(client, "roles", api_key, payload)
-        print(f"  ✓ Created role '{name}'")
+        print(f"  ✓ Role '{rc['name']}' already exists")
 
 
 # ── .env generation ────────────────────────────────────────────────
@@ -219,7 +259,7 @@ def main():
     # 2. Login & get API key
     print("[Step 2] Logging in as admin ...")
     api_key = _login(client)
-    print(f"  ✓ API Key: {api_key[:8]}...{api_key[-8:]}")
+    print("  ✓ Login succeeded and API key was obtained")
 
     # 3. Project
     print("[Step 3] Ensuring project ...")

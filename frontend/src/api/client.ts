@@ -3,12 +3,46 @@ const API_BASE = '/api'
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${url}`, {
     headers: { 'Content-Type': 'application/json', ...options.headers },
+    credentials: 'include',
     ...options,
   })
   if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`)
+    if (response.status === 401) window.dispatchEvent(new Event('auth:unauthorized'))
+    const body = await response.json().catch(() => null)
+    const detail = body?.detail
+    throw new Error(
+      typeof detail === 'string' && detail
+        ? detail
+        : `API error: ${response.status} ${response.statusText}`,
+    )
   }
   return response.json()
+}
+
+export interface AuthUser {
+  id: number
+  username: string
+  name: string
+}
+
+export interface AuthSession {
+  authenticated: true
+  user: AuthUser
+}
+
+export function getSession(): Promise<AuthSession> {
+  return request<AuthSession>('/auth/session')
+}
+
+export function login(username: string, password: string): Promise<AuthSession> {
+  return request<AuthSession>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+}
+
+export function logout(): Promise<{ detail: string }> {
+  return request('/auth/logout', { method: 'POST' })
 }
 
 export interface Ticket {
@@ -17,6 +51,10 @@ export interface Ticket {
   description: string
   status: string
   priority: number
+  assignee: {
+    id: number
+    name: string
+  } | null
   created_on?: string
   updated_on?: string
   notes?: Array<{ body: string; author: string; created_on: string }>
@@ -36,6 +74,7 @@ export interface TicketListResponse {
 
 export interface GetTicketsOptions {
   status?: string
+  responderView?: boolean
   limit?: number
   offset?: number
 }
@@ -43,6 +82,7 @@ export interface GetTicketsOptions {
 export async function getTickets(opts: GetTicketsOptions = {}): Promise<TicketListResponse> {
   const params = new URLSearchParams()
   if (opts.status) params.set('status', opts.status)
+  if (opts.responderView) params.set('view', 'responder')
   if (opts.limit !== undefined) params.set('limit', String(opts.limit))
   if (opts.offset !== undefined) params.set('offset', String(opts.offset))
 
@@ -73,6 +113,12 @@ export async function updateStatus(ticketId: number, statusId: number): Promise<
   await request(`/tickets/${ticketId}/status`, {
     method: 'PATCH',
     body: JSON.stringify({ status_id: statusId }),
+  })
+}
+
+export async function claimTicket(ticketId: number): Promise<void> {
+  await request(`/tickets/${ticketId}/assignee`, {
+    method: 'PATCH',
   })
 }
 

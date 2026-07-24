@@ -23,12 +23,39 @@ services:
       REDMINE_DB_POSTGRES: "postgres"
       REDMINE_DB_USER: "postgres"
       REDMINE_DB_PASSWORD: "postgres"
-      REDMINE_DB_NAME: "redmine"
+      REDMINE_DB_DATABASE: "redmine"
+      SECRET_KEY_BASE: "${REDMINE_SECRET_KEY_BASE:-local-development-redmine-secret-key-base-change-before-production-2026}"
+      REDMINE_API_KEY: "${REDMINE_API_KEY:?Set REDMINE_API_KEY in .env}"
+      REDMINE_PROJECT_ID: "${REDMINE_PROJECT_ID:-1}"
+      REDMINE_TRACKER_NAME: "問い合わせ"
+      REDMINE_LANG: "en"
+      ENABLE_TEST_USERS: "${ENABLE_TEST_USERS:-false}"
+      TEST_ADMIN_USERNAME: "${TEST_ADMIN_USERNAME:-}"
+      TEST_ADMIN_PASSWORD: "${TEST_ADMIN_PASSWORD:-}"
+      TEST_ADMIN_EMAIL: "${TEST_ADMIN_EMAIL:-}"
+      TEST_SUPPORT_USERNAME: "${TEST_SUPPORT_USERNAME:-}"
+      TEST_SUPPORT_PASSWORD: "${TEST_SUPPORT_PASSWORD:-}"
+      TEST_SUPPORT_EMAIL: "${TEST_SUPPORT_EMAIL:-}"
+      TEST_SALES_USERNAME: "${TEST_SALES_USERNAME:-}"
+      TEST_SALES_PASSWORD: "${TEST_SALES_PASSWORD:-}"
+      TEST_SALES_EMAIL: "${TEST_SALES_EMAIL:-}"
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - redmine_data:/usr/src/redmine/files
+      - redmine_assets:/usr/src/redmine/public/assets
+      - ./scripts/bootstrap_redmine.rb:/usr/src/redmine/bootstrap_redmine.rb:ro
+    healthcheck:
+      test:
+        - CMD
+        - ruby
+        - -rnet/http
+        - -e
+        - 'exit(Net::HTTP.get_response(URI("http://localhost:3000/login")).is_a?(Net::HTTPSuccess) ? 0 : 1)'
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
   backend:
     build:
@@ -39,12 +66,27 @@ services:
       - "8000:8000"
     environment:
       REDMINE_BASE_URL: "http://redmine:3000"
-      REDMINE_API_KEY: "${REDMINE_API_KEY:-10715d6427cd67bf1356eb487673a37fb801fe96}"
+      REDMINE_API_KEY: "${REDMINE_API_KEY:?Set REDMINE_API_KEY in .env}"
       REDMINE_PROJECT_ID: "${REDMINE_PROJECT_ID:-1}"
       REDMINE_TRACKER_ID: "${REDMINE_TRACKER_ID:-3}"
+      REDIS_URL: "redis://redis:6379/0"
+      SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-false}"
       OTEL_EXPORTER_OTLP_ENDPOINT: "tempo:4317"
     depends_on:
-      - redmine
+      redmine:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: ticket_redis
+    command: ["redis-server", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   frontend:
     build:
@@ -71,4 +113,5 @@ services:
 
 volumes:
   redmine_data:
+  redmine_assets:
   pg_data:

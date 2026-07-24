@@ -51,6 +51,56 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+.ticket-assignee {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 6px;
+  background: #eef6fc;
+  color: #2c3e50;
+}
+
+.ticket-assignee span {
+  color: #5f6f7f;
+  font-size: 0.875rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(18, 31, 43, 0.52);
+}
+
+.confirm-dialog {
+  width: min(100%, 460px);
+  padding: 1.5rem;
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 18px 50px rgba(18, 31, 43, 0.28);
+}
+
+.confirm-dialog h2 {
+  margin-bottom: 0.75rem;
+  font-size: 1.25rem;
+}
+
+.confirm-dialog p {
+  color: #566573;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
 /* Form */
 .form-group {
   margin-bottom: 1rem;
@@ -201,3 +251,27 @@ body {
   border-radius: 4px;
   margin-bottom: 1rem;
 }
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  background: linear-gradient(145deg, #eef6fc, #f5f5f5);
+}
+
+.login-card {
+  width: min(100%, 420px);
+  padding: 2.5rem;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 12px 36px rgba(44, 62, 80, 0.15);
+}
+
+.login-brand { color: #2980b9; font-weight: 700; margin-bottom: 1.5rem; }
+.login-card h1 { margin-bottom: .25rem; }
+.login-help { color: #666; margin-bottom: 1.5rem; }
+.login-button { width: 100%; }
+.auth-loading { margin-top: 20vh; }
+.nav-user { margin-left: 1rem; font-size: .9rem; opacity: .85; }
+.nav-logout { margin-left: .75rem; color: white; background: transparent; border: 1px solid rgba(255,255,255,.6); border-radius: 4px; padding: .35rem .6rem; cursor: pointer; }

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import FastAPI, Request
+from pydantic import BaseModel
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
@@ -16,6 +18,8 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+from src.backend.auth import SessionData, SessionStore, authenticate_with_redmine
 
 # ── OpenTelemetry setup ─────────────────────────────────────────────
 
@@ -37,12 +41,18 @@ trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(span_exporter)
 app = FastAPI(title="Redmine Ticket Portal API")
 
 # CORS - explicit origins (no "*" + credentials=True conflict)
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "http://localhost:3001").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # FastAPI auto-instrumentation (covers route handlers, DB spans etc.)
@@ -56,6 +66,9 @@ REDMINE_BASE_URL = os.getenv("REDMINE_BASE_URL", "http://redmine:3000")
 REDMINE_API_KEY = os.getenv("REDMINE_API_KEY", "")
 REDMINE_PROJECT_ID = os.getenv("REDMINE_PROJECT_ID", "")
 REDMINE_TRACKER_ID = os.getenv("REDMINE_TRACKER_ID", "3")
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "session_id")
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "true").lower() in ("1", "true", "yes")
 
 if not REDMINE_API_KEY:
     raise RuntimeError("REDMINE_API_KEY must be set")
@@ -63,6 +76,7 @@ if not REDMINE_PROJECT_ID:
     raise RuntimeError("REDMINE_PROJECT_ID must be set")
 
 HEADERS = {"X-Redmine-API-Key": REDMINE_API_KEY, "Content-Type": "application/json"}
+session_store = SessionStore(REDIS_URL)
 
 # ── Status cache ────────────────────────────────────────────────────
 # Populated at startup by querying Redmine's /issue_statuses.json.
@@ -77,59 +91,90 @@ _status_by_key: Dict[str, int] = {}
 # Mapping: English filter key (used by frontend) → set of Redmine slug/name matches.
 # This is filled dynamically at startup by querying /issue_statuses.json.
 _ENGLISH_KEY_MATCHERS: Dict[str, set] = {
-    "open":        {"new", "open"},
-    "in_progress": {"in_progress", "in progress", "progress"},
-    "feedback":    {"reopened", "re_opened", "feedback", "additional_question"},
-    "closed":      {"closed"},
+    "open":        {"new", "open", "新規"},
+    "in_progress": {"in_progress", "in progress", "progress", "進行中", "対応中"},
+    "answered": {"resolved", "answered", "回答済"},
+    "additional_question": {
+        "reopened",
+        "re-opened",
+        "re_opened",
+        "feedback",
+        "additional_question",
+        "フィードバック",
+        "追加質問",
+    },
+    "pending_close": {"rejected", "pending_close", "クローズ待ち"},
+    "closed":      {"closed", "終了", "クローズ"},
 }
 
-# Default fallback (when Redmine is not reachable at startup):
+# Redmine 6.1 default fallback (when Redmine is not reachable at startup):
 _DEFAULT_KEY_FALLBACK: Dict[str, int] = {
     "open":        1,   # New
     "in_progress": 2,   # In Progress
-    "feedback":    3,   # Reopened
-    "closed":      4,   # Closed
+    "answered":    3,   # Resolved
+    "additional_question": 4,  # Feedback
+    "pending_close": 6,  # Rejected
+    "closed":      5,   # Closed
 }
 
 
 async def _fetch_statuses() -> None:
-    """Query Redmine /issue_statuses.json and populate caches."""
-    try:
-        async with httpx.AsyncClient(
-            base_url=REDMINE_BASE_URL, headers=HEADERS, timeout=10.0
-        ) as c:
-            r = await c.get("/issue_statuses.json")
-        if r.status_code != 200:
-            raise RuntimeError(f"GET issue_statuses failed: {r.status_code}")
+    """Query Redmine /issue_statuses.json and populate caches.
 
-        for s in r.json().get("issue_statuses", []):
-            sid = int(s["id"])
-            name = s.get("name", "")
-            slug = s.get("slug", "").lower()
-            _status_by_name[name] = sid
-            _status_by_id[sid] = name
+    Called at startup with retries. If Redmine is not ready, falls back to
+    default mappings so the backend can still start.
+    """
+    for attempt in range(1, 4):
+        try:
+            async with httpx.AsyncClient(
+                base_url=REDMINE_BASE_URL, headers=HEADERS, timeout=5.0
+            ) as c:
+                r = await c.get("/issue_statuses.json")
 
-            # Map English filter keys if the slug/name matches.
-            for key, aliases in _ENGLISH_KEY_MATCHERS.items():
-                if slug in aliases or name.lower() in aliases:
-                    _status_by_key[key] = sid
-                    break
-            else:
-                # Fallback: use slug as-is if it looks like an English key.
-                if slug and slug in _ENGLISH_KEY_MATCHERS:
-                    _status_by_key[slug] = sid
+            if r.status_code != 200:
+                raise RuntimeError(f"GET issue_statuses failed: {r.status_code}")
 
-    except Exception as e:
-        print(f"[WARN] Failed to fetch statuses from Redmine: {e}")
-        print(f"       Using default fallback mapping: {_DEFAULT_KEY_FALLBACK}")
-        _status_by_key.update(_DEFAULT_KEY_FALLBACK)
-        # Populate _status_by_id with defaults so /status/options works
-        for key, sid in _DEFAULT_KEY_FALLBACK.items():
-            _status_by_id[sid] = key
+            # Guard against empty response bodies (Redmine not ready yet).
+            body = r.text.strip()
+            if not body:
+                raise ValueError("Empty response from Redmine")
+
+            for s in r.json().get("issue_statuses", []):
+                sid = int(s["id"])
+                name = s.get("name", "")
+                normalized_name = name.strip().casefold()
+                slug = s.get("slug", "").strip().casefold()
+                _status_by_name[name] = sid
+                _status_by_id[sid] = name
+
+                for key, aliases in _ENGLISH_KEY_MATCHERS.items():
+                    if slug in aliases or normalized_name in aliases:
+                        _status_by_key[key] = sid
+                        break
+                else:
+                    if slug and slug in _ENGLISH_KEY_MATCHERS:
+                        _status_by_key[slug] = sid
+
+            print(f"[INFO] Loaded {len(_status_by_id)} statuses from Redmine (attempt {attempt})")
+            return  # Success!
+
+        except Exception as e:
+            print(f"[WARN] Failed to fetch statuses (attempt {attempt}/3): {e}")
+
+    # All retries failed -- use defaults.
+    print(f"[WARN] Using default fallback mapping: {_DEFAULT_KEY_FALLBACK}")
+    _status_by_key.update(_DEFAULT_KEY_FALLBACK)
+    for key, sid in _DEFAULT_KEY_FALLBACK.items():
+        _status_by_id[sid] = key
 
 
 @app.on_event("startup")
 async def startup():
+    print(f"[STARTUP] Backend starting...")
+    print(f"[STARTUP] REDMINE_BASE_URL={REDMINE_BASE_URL}")
+    print(f"[STARTUP] REDMINE_PROJECT_ID={REDMINE_PROJECT_ID}")
+    print(f"[STARTUP] REDMINE_API_KEY={'SET' if REDMINE_API_KEY else 'NOT SET'}")
+
     await _fetch_statuses()
     print(f"[INFO] Loaded statuses by name: {_status_by_name}")
     print(f"[INFO] Loaded status key map:   {_status_by_key}")
@@ -138,20 +183,51 @@ async def startup():
     print(f"[INFO] Loaded status key map: {_status_by_key}")
 
 
-def _client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(base_url=REDMINE_BASE_URL, headers=HEADERS, timeout=10.0)
+@app.on_event("shutdown")
+async def shutdown():
+    await session_store.close()
+
+
+def _client(api_key: str) -> httpx.AsyncClient:
+    headers = {"X-Redmine-API-Key": api_key, "Content-Type": "application/json"}
+    return httpx.AsyncClient(base_url=REDMINE_BASE_URL, headers=headers, timeout=10.0)
+
+
+def get_session_store() -> SessionStore:
+    return session_store
+
+
+async def require_session(
+    session_id: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    store: SessionStore = Depends(get_session_store),
+) -> SessionData:
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    session = await store.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return session
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
 def _issue_to_dict(i: Dict[str, Any]) -> Dict[str, Any]:
     """Extract common fields from a Redmine issue dict."""
+    assigned_to = i.get("assigned_to")
     return {
         "id": i["id"],
         "subject": i.get("subject", ""),
         "description": i.get("description", ""),
         "status": i["status"]["name"],
         "priority": int(i["priority"]["id"]),
+        "assignee": (
+            {
+                "id": int(assigned_to["id"]),
+                "name": assigned_to.get("name", ""),
+            }
+            if assigned_to
+            else None
+        ),
         "created_on": i.get("created_on", ""),
         "updated_on": i.get("updated_on", ""),
     }
@@ -201,7 +277,11 @@ def _field_display_name(field: str) -> str:
     return _FIELD_NAME_MAP.get(clean, field)
 
 
-def _journals_to_audit(journals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _journals_to_audit(
+    journals: List[Dict[str, Any]],
+    user_names: Optional[Dict[int, str]] = None,
+    status_names: Optional[Dict[int, str]] = None,
+) -> List[Dict[str, Any]]:
     """Convert Redmine journals to audit log entries.
 
     Each journal entry becomes a dict with:
@@ -212,6 +292,27 @@ def _journals_to_audit(journals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
       changes: list of field change dicts (if any)
     """
     entries: List[Dict[str, Any]] = []
+    user_names = user_names or {}
+    status_names = status_names or {}
+
+    def change_dict(detail: Dict[str, Any]) -> Dict[str, Any]:
+        # Redmine 6 uses `name`; older/test payloads may use `prop_key`.
+        field = detail.get("name") or detail.get("prop_key", "")
+        old_value = detail.get("old_value")
+        new_value = detail.get("new_value")
+        if field in ("assigned_to", "assigned_to_id"):
+            old_value = _user_name_for_audit(old_value, user_names)
+            new_value = _user_name_for_audit(new_value, user_names)
+        elif field in ("status", "status_id"):
+            old_value = _status_name_for_audit(old_value, status_names)
+            new_value = _status_name_for_audit(new_value, status_names)
+        return {
+            "field": field,
+            "display_field": _field_display_name(field),
+            "old_value": old_value,
+            "new_value": new_value,
+        }
+
     for j in journals:
         body = j.get("notes", "")
         details = j.get("details", [])
@@ -233,36 +334,46 @@ def _journals_to_audit(journals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if has_comment and has_changes:
             entry["type"] = "both"
             entry["comment"] = body
-            entry["changes"] = [
-                {
-                    "field": d.get("prop_key", ""),
-                    "display_field": _field_display_name(d.get("prop_key", "")),
-                    "old_value": d.get("old_value"),
-                    "new_value": d.get("new_value"),
-                }
-                for d in details
-            ]
+            entry["changes"] = [change_dict(d) for d in details]
         elif has_comment:
             entry["type"] = "comment"
             entry["comment"] = body
             entry["changes"] = []
         elif has_changes:
             entry["type"] = "change"
-            entry["changes"] = [
-                {
-                    "field": d.get("prop_key", ""),
-                    "display_field": _field_display_name(d.get("prop_key", "")),
-                    "old_value": d.get("old_value"),
-                    "new_value": d.get("new_value"),
-                }
-                for d in details
-            ]
+            entry["changes"] = [change_dict(d) for d in details]
         else:
             # Journal with no notes and no details -- skip it.
             continue
 
         entries.append(entry)
     return entries
+
+
+def _user_name_for_audit(
+    value: Any,
+    user_names: Dict[int, str],
+) -> Any:
+    """Replace a Redmine user ID with its display name when available."""
+    if value in (None, ""):
+        return value
+    try:
+        return user_names.get(int(value), value)
+    except (TypeError, ValueError):
+        return value
+
+
+def _status_name_for_audit(
+    value: Any,
+    status_names: Dict[int, str],
+) -> Any:
+    """Replace a Redmine status ID with its display name when available."""
+    if value in (None, ""):
+        return value
+    try:
+        return status_names.get(int(value), value)
+    except (TypeError, ValueError):
+        return value
 
 
 def _resolve_status_id(status_key: str) -> Optional[int]:
@@ -277,12 +388,185 @@ def _resolve_status_id(status_key: str) -> Optional[int]:
     return None
 
 
+async def _support_user_ids() -> set[int]:
+    """Return project members who have the support role."""
+    support_ids: set[int] = set()
+    offset = 0
+    limit = 100
+
+    async with httpx.AsyncClient(
+        base_url=REDMINE_BASE_URL, headers=HEADERS, timeout=10.0
+    ) as client:
+        while True:
+            response = await client.get(
+                f"/projects/{REDMINE_PROJECT_ID}/memberships.json",
+                params={"limit": limit, "offset": offset},
+            )
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"GET project memberships failed: {response.status_code}"
+                )
+
+            body = response.json()
+            memberships = body.get("memberships", [])
+            for membership in memberships:
+                user = membership.get("user")
+                roles = membership.get("roles", [])
+                if user and any(
+                    role.get("name") == "サポート担当者" for role in roles
+                ):
+                    support_ids.add(int(user["id"]))
+
+            total_count = int(body.get("total_count", len(memberships)))
+            offset += len(memberships)
+            if not memberships or offset >= total_count:
+                break
+
+    return support_ids
+
+
+async def _project_user_names() -> Dict[int, str]:
+    """Return a user ID to display name map for the current project."""
+    names: Dict[int, str] = {}
+    offset = 0
+    limit = 100
+
+    async with httpx.AsyncClient(
+        base_url=REDMINE_BASE_URL, headers=HEADERS, timeout=10.0
+    ) as client:
+        while True:
+            response = await client.get(
+                f"/projects/{REDMINE_PROJECT_ID}/memberships.json",
+                params={"limit": limit, "offset": offset},
+            )
+            if response.status_code != 200:
+                break
+            body = response.json()
+            memberships = body.get("memberships", [])
+            for membership in memberships:
+                user = membership.get("user")
+                if user:
+                    names[int(user["id"])] = user.get("name", "")
+            total_count = int(body.get("total_count", len(memberships)))
+            offset += len(memberships)
+            if not memberships or offset >= total_count:
+                break
+
+    return names
+
+
 # ── Endpoints ───────────────────────────────────────────────────────
 
+class CreateTicketRequest(BaseModel):
+    subject: str
+    description: str
+    priority: Optional[int] = None
+    tracker_id: Optional[int] = None
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/auth/login")
+async def login(
+    credentials: LoginRequest,
+    response: Response,
+    store: SessionStore = Depends(get_session_store),
+):
+    username = credentials.username.strip()
+    if not username or not credentials.password:
+        raise HTTPException(status_code=422, detail="Username and password are required")
+
+    try:
+        session = await authenticate_with_redmine(
+            REDMINE_BASE_URL, username, credentials.password
+        )
+    except (httpx.HTTPError, RuntimeError, KeyError, ValueError):
+        # Do not expose whether the account exists or why Redmine rejected it.
+        raise HTTPException(status_code=401, detail="Invalid username or password") from None
+    if session is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    session_id = await store.create(session)
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session_id,
+        max_age=21_600,
+        httponly=True,
+        secure=SESSION_COOKIE_SECURE,
+        samesite="lax",
+        path="/",
+    )
+    return {
+        "authenticated": True,
+        "user": {
+            "id": session.redmine_user_id,
+            "username": session.username,
+            "name": session.name,
+        },
+    }
+
+
+@app.get("/auth/session")
+async def current_session(session: SessionData = Depends(require_session)):
+    return {
+        "authenticated": True,
+        "user": {
+            "id": session.redmine_user_id,
+            "username": session.username,
+            "name": session.name,
+        },
+    }
+
+
+@app.post("/auth/logout")
+async def logout(
+    response: Response,
+    session_id: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    store: SessionStore = Depends(get_session_store),
+):
+    if session_id:
+        await store.delete(session_id)
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=SESSION_COOKIE_SECURE,
+        samesite="lax",
+    )
+    return {"detail": "Logged out"}
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all exception handler for debugging."""
+    import traceback
+    print(f"[ERROR] Unhandled exception at {request.url.path}")
+    traceback.print_exc()
+
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc), "type": type(exc).__name__},
+    )
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for debugging."""
+    return {
+        "status": "healthy",
+        "redmine_url": REDMINE_BASE_URL,
+        "project_id": REDMINE_PROJECT_ID,
+        "api_key_set": bool(REDMINE_API_KEY),
+    }
+
 @app.post("/tickets")
-async def create_ticket(request: Request):
+async def create_ticket(
+    ticket_data: CreateTicketRequest,
+    session: SessionData = Depends(require_session),
+):
     with tracer.start_as_current_span("create_ticket") as span:
-        raw = await request.json()
+        raw = ticket_data.dict()
         span.set_attribute("request.subject", raw.get("subject"))
 
         subject = raw.get("subject")
@@ -308,20 +592,37 @@ async def create_ticket(request: Request):
         if tracker_id is not None:
             payload["issue"]["tracker_id"] = tracker_id
 
-        async with _client() as c:
+        async with _client(session.redmine_api_key) as c:
             r = await c.post("/issues.json", json=payload)
             span.set_attribute("redmine.status", r.status_code)
             if r.status_code != 201:
                 return JSONResponse(status_code=r.status_code, content={"detail": r.text})
             issue = r.json()["issue"]
-            return _issue_to_dict(issue)
+            result = _issue_to_dict(issue)
+            print(f"[DEBUG] Created ticket: {result['id']}")
+            return result
 
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all exception handler for debugging."""
+    import traceback
+    print(f"[ERROR] Unhandled exception at {request.url.path}")
+    traceback.print_exc()
+
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc), "type": type(exc).__name__},
+    )
 
 @app.get("/tickets")
-async def list_tickets(request: Request):
+async def list_tickets(
+    request: Request, session: SessionData = Depends(require_session)
+):
     with tracer.start_as_current_span("list_tickets") as span:
         qs = dict(request.query_params)
         status_key = qs.get("status", "")
+        responder_view = qs.get("view") == "responder"
         if status_key:
             span.set_attribute("filter.status", status_key)
 
@@ -340,25 +641,63 @@ async def list_tickets(request: Request):
         params: Dict[str, Any] = {"project_id": REDMINE_PROJECT_ID}
 
         # Translate frontend's English status key → Redmine status_id for filtering.
-        if status_key:
+        if responder_view:
+            # Redmine's special "open" value includes every non-closed status,
+            # including newly created tickets.
+            params["status_id"] = "open"
+        elif status_key:
             sid = _resolve_status_id(status_key)
             if sid is not None:
                 params["status_id"] = sid
             else:
                 print(f"[WARN] Unknown status filter '{status_key}', no mapping in {_status_by_key}")
 
-        # Add pagination to Redmine query
-        params["limit"] = limit
-        params["offset"] = offset
+        # Responder filtering happens after fetching because Redmine cannot
+        # filter assignees by project role.
+        params["limit"] = 1000 if responder_view else limit
+        params["offset"] = 0 if responder_view else offset
 
-        async with _client() as c:
+        async with _client(session.redmine_api_key) as c:
             r = await c.get("/issues.json", params=params)
             span.set_attribute("redmine.status", r.status_code)
             if r.status_code != 200:
                 return JSONResponse(status_code=r.status_code, content={"detail": r.text})
 
+            # Redmine normally honors limit, but keep our API contract even if
+            # an upstream proxy/mock returns more rows than requested.
             issues = r.json()["issues"]
-            total_count = r.json().get("total_count", len(issues))
+            if responder_view:
+                responder_statuses = {
+                    "新規",
+                    "対応中",
+                    "追加質問",
+                    "クローズ待ち",
+                    # Backward compatibility while an existing environment is
+                    # being migrated by the bootstrap.
+                    "New",
+                    "In Progress",
+                    "Feedback",
+                    "Reopened",
+                    "Rejected",
+                }
+                try:
+                    support_ids = await _support_user_ids()
+                except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
+                    support_ids = {session.redmine_user_id}
+                issues = [
+                    issue
+                    for issue in issues
+                    if issue.get("status", {}).get("name") in responder_statuses
+                    and (
+                        not issue.get("assigned_to")
+                    or int(issue["assigned_to"]["id"]) in support_ids
+                    )
+                ]
+                total_count = len(issues)
+                issues = issues[offset : offset + limit]
+            else:
+                issues = issues[:limit]
+                total_count = r.json().get("total_count", len(issues))
             result = [_issue_to_dict(i) for i in issues]
             span.set_attribute("result.count", len(result))
 
@@ -373,11 +712,23 @@ async def list_tickets(request: Request):
             }
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all exception handler for debugging."""
+    import traceback
+    print(f"[ERROR] Unhandled exception at {request.url.path}")
+    traceback.print_exc()
+
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc), "type": type(exc).__name__},
+    )
+
 @app.get("/tickets/{ticket_id}")
-async def get_ticket(ticket_id: int):
+async def get_ticket(ticket_id: int, session: SessionData = Depends(require_session)):
     with tracer.start_as_current_span("get_ticket") as span:
         span.set_attribute("ticket.id", ticket_id)
-        async with _client() as c:
+        async with _client(session.redmine_api_key) as c:
             # include=journals fetches comment history
             r = await c.get(f"/issues/{ticket_id}.json", params={"include": "journals"})
             span.set_attribute("redmine.status", r.status_code)
@@ -385,35 +736,139 @@ async def get_ticket(ticket_id: int):
                 return JSONResponse(status_code=r.status_code, content={"detail": r.text})
             i = r.json()["issue"]
             data = _issue_to_dict(i)
+            try:
+                user_names = await _project_user_names()
+            except (httpx.HTTPError, ValueError, KeyError):
+                user_names = {}
+            user_names[session.redmine_user_id] = session.name
+            assigned_to = i.get("assigned_to")
+            if assigned_to:
+                user_names[int(assigned_to["id"])] = assigned_to.get("name", "")
             # Full audit log with comments + field changes.
-            data["audit_log"] = _journals_to_audit(i.get("journals", []))
+            data["audit_log"] = _journals_to_audit(
+                i.get("journals", []),
+                user_names,
+                _status_by_id,
+            )
             # Also provide backward-compatible notes list.
             data["notes"] = _journals_to_notes(i.get("journals", []))
             return data
 
 
+class AddCommentRequest(BaseModel):
+    body: str
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all exception handler for debugging."""
+    import traceback
+    print(f"[ERROR] Unhandled exception at {request.url.path}")
+    traceback.print_exc()
+
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc), "type": type(exc).__name__},
+    )
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for debugging."""
+    return {
+        "status": "healthy",
+        "redmine_url": REDMINE_BASE_URL,
+        "project_id": REDMINE_PROJECT_ID,
+        "api_key_set": bool(REDMINE_API_KEY),
+    }
+
 @app.post("/tickets/{ticket_id}/comments")
-async def add_comment(ticket_id: int, request: Request):
+async def add_comment(
+    ticket_id: int,
+    comment_data: AddCommentRequest,
+    session: SessionData = Depends(require_session),
+):
     with tracer.start_as_current_span("add_comment") as span:
         span.set_attribute("ticket.id", ticket_id)
-        raw = await request.json()
+        raw = comment_data.dict()
         body = raw.get("body", "")
         if not body:
             return JSONResponse(status_code=422, content={"detail": "body is required"})
         payload = {"issue": {"notes": body}}
-        async with _client() as client:
+        async with _client(session.redmine_api_key) as client:
             r = await client.put(f"/issues/{ticket_id}.json", json=payload)
             span.set_attribute("redmine.status", r.status_code)
-            if r.status_code != 200:
+            if r.status_code not in (200, 204):
                 return JSONResponse(status_code=r.status_code, content={"detail": r.text})
             return {"detail": "Comment added"}
 
 
+class UpdateStatusRequest(BaseModel):
+    status_id: int
+
+
+@app.patch("/tickets/{ticket_id}/assignee")
+async def claim_ticket(
+    ticket_id: int,
+    session: SessionData = Depends(require_session),
+):
+    """Assign a ticket to the currently signed-in Redmine user."""
+    with tracer.start_as_current_span("claim_ticket") as span:
+        span.set_attribute("ticket.id", ticket_id)
+        span.set_attribute("assignee.id", session.redmine_user_id)
+        in_progress_id = _resolve_status_id("in_progress")
+        if in_progress_id is None:
+            raise HTTPException(
+                status_code=503,
+                detail="対応中ステータスが設定されていません",
+            )
+        payload = {
+            "issue": {
+                "assigned_to_id": session.redmine_user_id,
+                "status_id": in_progress_id,
+            }
+        }
+        async with _client(session.redmine_api_key) as client:
+            response = await client.put(
+                f"/issues/{ticket_id}.json",
+                json=payload,
+            )
+        span.set_attribute("redmine.status", response.status_code)
+        if response.status_code not in (200, 204):
+            return JSONResponse(
+                status_code=response.status_code,
+                content={"detail": response.text},
+            )
+        async with _client(session.redmine_api_key) as client:
+            refreshed = await client.get(f"/issues/{ticket_id}.json")
+        if refreshed.status_code != 200:
+            return JSONResponse(
+                status_code=refreshed.status_code,
+                content={"detail": refreshed.text},
+            )
+        issue = refreshed.json()["issue"]
+        assignee = issue.get("assigned_to")
+        if (
+            int(issue["status"]["id"]) != in_progress_id
+            or not assignee
+            or int(assignee["id"]) != session.redmine_user_id
+        ):
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "担当者または対応中ステータスを反映できませんでした"
+                },
+            )
+        return {"detail": "Assignee and status updated"}
+
+
 @app.patch("/tickets/{ticket_id}/status")
-async def update_status(ticket_id: int, request: Request):
+async def update_status(
+    ticket_id: int,
+    status_data: UpdateStatusRequest,
+    session: SessionData = Depends(require_session),
+):
     with tracer.start_as_current_span("update_status") as span:
         span.set_attribute("ticket.id", ticket_id)
-        raw = await request.json()
+        raw = status_data.dict()
         status_value = raw.get("status_id", "")
         if not status_value:
             return JSONResponse(status_code=422, content={"detail": "status_id is required"})
@@ -431,19 +886,89 @@ async def update_status(ticket_id: int, request: Request):
                 content={"detail": f"Unknown status value: {status_value}"},
             )
 
+        if _status_by_id and sid not in _status_by_id:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": f"Unknown status ID: {sid}"},
+            )
+
         span.set_attribute("new.status_id", sid)
         payload = {"issue": {"status_id": sid}}
-        async with _client() as client:
+        clears_assignee = _status_by_id.get(sid) == "追加質問"
+        if clears_assignee:
+            # A follow-up question returns the ticket to the shared support
+            # queue so another support user can claim it.
+            # Redmine ignores JSON null for this field; an empty string is its
+            # REST representation for "unassigned".
+            payload["issue"]["assigned_to_id"] = ""
+        async with _client(session.redmine_api_key) as client:
             r = await client.put(f"/issues/{ticket_id}.json", json=payload)
             span.set_attribute("redmine.status", r.status_code)
-            if r.status_code != 200:
+            if r.status_code not in (200, 204):
                 return JSONResponse(status_code=r.status_code, content={"detail": r.text})
+            refreshed = await client.get(f"/issues/{ticket_id}.json")
+            if refreshed.status_code != 200:
+                return JSONResponse(
+                    status_code=refreshed.status_code,
+                    content={"detail": refreshed.text},
+                )
+            actual_status_id = int(refreshed.json()["issue"]["status"]["id"])
+            if actual_status_id != sid:
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": (
+                            "このステータスへの変更は現在のワークフローでは"
+                            "許可されていません"
+                        )
+                    },
+                )
+            if clears_assignee and refreshed.json()["issue"].get("assigned_to"):
+                return JSONResponse(
+                    status_code=409,
+                    content={"detail": "担当者の解除を反映できませんでした"},
+                )
             return {"detail": "Status updated"}
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all exception handler for debugging."""
+    import traceback
+    print(f"[ERROR] Unhandled exception at {request.url.path}")
+    traceback.print_exc()
+
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc), "type": type(exc).__name__},
+    )
+
 @app.get("/status/options")
-async def status_options():
+async def status_options(session: SessionData = Depends(require_session)):
     """Return all Redmine issue statuses for frontend dropdowns."""
+    # Refresh with the signed-in user's API key. The startup cache may contain
+    # only fallback values when Redmine was not ready yet.
+    try:
+        async with _client(session.redmine_api_key) as client:
+            response = await client.get("/issue_statuses.json")
+        if response.status_code == 200:
+            statuses = response.json().get("issue_statuses", [])
+            if statuses:
+                refreshed_by_id: Dict[int, str] = {}
+                refreshed_by_name: Dict[str, int] = {}
+                for status in statuses:
+                    sid = int(status["id"])
+                    name = status.get("name", "")
+                    refreshed_by_id[sid] = name
+                    refreshed_by_name[name] = sid
+                _status_by_id.clear()
+                _status_by_id.update(refreshed_by_id)
+                _status_by_name.clear()
+                _status_by_name.update(refreshed_by_name)
+    except (httpx.HTTPError, ValueError, KeyError):
+        # Keep serving the last known cache if Redmine is temporarily down.
+        pass
+
     result = []
     for sid, name in sorted(_status_by_id.items()):
         result.append({"id": sid, "label": name})

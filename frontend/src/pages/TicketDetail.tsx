@@ -24,7 +24,12 @@ export function TicketDetail() {
       ])
       setTicket(t)
       setAuditLog((t as any).audit_log || [])
-      setStatusOptions(opts)
+      const options = opts.length > 0
+        ? opts
+        : [{ id: 0, label: t.status }]
+      setStatusOptions(options)
+      const current = options.find(opt => opt.label === t.status)
+      setStatus(String(current?.id ?? options[0]?.id ?? ''))
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'チケットの取得に失敗しました'
       setError(msg)
@@ -105,6 +110,10 @@ export function TicketDetail() {
         <div style={{ marginTop: '1rem', color: '#666' }}>
           <strong>ID:</strong> {ticket.id} | <strong>ステータス:</strong> {ticket.status} | <strong>優先度:</strong> {ticket.priority}
         </div>
+        <div className="ticket-assignee">
+          <span>対応者</span>
+          <strong>{ticket.assignee?.name || '未割り当て'}</strong>
+        </div>
         <div style={{ marginTop: '1rem', whiteSpace: 'pre-wrap' }}>{ticket.description}</div>
       </div>
 
@@ -139,7 +148,11 @@ export function TicketDetail() {
             <option key={opt.id} value={opt.id}>{opt.label}</option>
           ))}
         </select>
-        <button className="btn btn-success" onClick={() => handleStatus(parseInt(status))}>
+        <button
+          className="btn btn-success"
+          onClick={() => handleStatus(parseInt(status))}
+          disabled={!status || parseInt(status) === 0}
+        >
           更新
         </button>
       </div>

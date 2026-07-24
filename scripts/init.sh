@@ -18,8 +18,10 @@ echo "    ADMIN_USER=${ADMIN_USER}"
 echo ""
 
 # ── 1. Redmine を起動 ──────────────────────────────────────────────
-echo "[Step 1] Starting docker compose services (postgres, redmine) ..."
-docker compose up -d postgres redmine
+echo "[Step 1] Starting and bootstrapping Redmine ..."
+docker compose up -d --wait postgres redmine
+docker compose exec -T redmine \
+  bundle exec rails runner /usr/src/redmine/bootstrap_redmine.rb
 
 # ── 2. Python 初期化スクリプトを実行 ───────────────────────────────
 echo "[Step 2] Running Redmine setup via init_redmine.py ..."

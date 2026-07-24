@@ -63,21 +63,22 @@ steps:
     vars:
       trackerId: vars.foundTracker.id
 
-  # ── Step 5: ステータス定義を確認（New/In Progress/Reopened/Closed が存在）──
-  - describe: "Default issue statuses exist (New=1, In Progress=2, Reopened=3, Closed=4)"
+  # ── Step 5: ポータル用の6ステータスが存在することを確認 ──────────
+  - describe: "Portal issue statuses exist"
     request:
       url: "${vars.redmineUrl}/issue_statuses.json"
       headers:
         X-Redmine-API-Key: "${vars.apiKey}"
     vars:
       statuses: response.body.issue_statuses
-      statusMap: >-
-        ${Object.fromEntries(
-          vars.statuses.map(s => [s.name.toLowerCase(), {id: s.id, slug: s.slug}])
-        )}
+      statusNames: ${vars.statuses.map(s => s.name)}
     assertions:
-      - len(vars.statusMap.new || vars.statusMap.新 || vars.statusMap.shinki || {}) > 0
-      - len(vars.statuses) >= 4
+      - vars.statusNames.includes("新規")
+      - vars.statusNames.includes("対応中")
+      - vars.statusNames.includes("回答済")
+      - vars.statusNames.includes("追加質問")
+      - vars.statusNames.includes("クローズ待ち")
+      - vars.statusNames.includes("クローズ")
 
   # ── Step 6: カスタムロール「営業担当者」と「サポート担当者」が存在することを確認 ───
   - describe: "Custom roles exist"
@@ -109,4 +110,3 @@ steps:
       url: "http://localhost:8000/tickets"
     assertions:
       - eq: [response.status, 200]
-

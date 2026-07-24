@@ -1,32 +1,42 @@
-[build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "ticket-portal"
-version = "0.1.0"
+name = "support-ticket-portal"
+version = "0.4.0"
+description = "社内問い合わせチケット管理システム"
+requires-python = ">=3.12"
 dependencies = [
-    "fastapi",
-    "uvicorn[standard]",
-    "httpx",
-    "pydantic",
-    "python-dotenv",
-    "opentelemetry-api",
-    "opentelemetry-sdk",
-    "opentelemetry-exporter-otlp-proto-grpc",
-    "opentelemetry-instrumentation-fastapi",
-    "opentelemetry-instrumentation-httpx",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.28",
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+    "redis>=5.2",
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27",
+    "opentelemetry-instrumentation-fastapi>=0.48b",
+    "opentelemetry-instrumentation-httpx>=0.48b",
 ]
 
-[tool.uv]
-# Enable pipx style package execution
-[tool.uv.dependencies]
-fastapi = "*"
-uvicorn[standard] = "*"
-httpx = "*"
-python-dotenv = "*"
-opentelemetry-api = "*"
-opentelemetry-sdk = "*"
-opentelemetry-exporter-otlp-proto-grpc = "*"
-opentelemetry-instrumentation-fastapi = "*"
-opentelemetry-instrumentation-httpx = "*"
+[dependency-groups]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.25",
+    "respx>=0.22",
+    "coverage>=7.0",
+    "pytest-cov>=6.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "--cov=src/backend",
+    "--cov-report=term-missing",
+    "-v",
+]
+
+[tool.coverage.run]
+source = ["src/backend"]
+omit = [
+    "*/__pycache__/*",
+]
