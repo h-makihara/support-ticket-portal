@@ -1,5 +1,6 @@
 """Unit tests for ticket CRUD endpoints."""
 
+import importlib
 import json
 from dataclasses import replace
 
@@ -7,6 +8,8 @@ import respx
 from fastapi.testclient import TestClient
 
 from src.backend.app import app, get_session_store
+
+app_module = importlib.import_module("src.backend.app")
 
 
 class TestCreateTicket:
@@ -200,6 +203,15 @@ class TestAddComment:
         """正常系: コメントが正しく追加される"""
         resp = client.post("/tickets/100/comments", json={"body": "テストコメント"})
         assert resp.status_code == 200
+        update_request = next(
+            call.request
+            for call in reversed(respx.calls)
+            if call.request.method == "PUT"
+            and call.request.url.path == "/issues/100.json"
+        )
+        assert json.loads(update_request.content) == {
+            "issue": {"notes": "テストコメント"}
+        }
 
     def test_add_comment_empty_body(self, client: TestClient):
         """異常系: body が空だと422エラー"""
@@ -246,6 +258,21 @@ class TestAnswerTicket:
 
         assert resp.status_code == 403
 
+    def test_answer_fails_when_answered_status_is_unavailable(
+        self, client: TestClient, monkeypatch
+    ):
+        original_resolver = app_module._resolve_status_id
+        monkeypatch.setattr(
+            app_module,
+            "_resolve_status_id",
+            lambda key: None if key == "answered" else original_resolver(key),
+        )
+
+        resp = client.post("/tickets/100/answer", json={"body": "回答です"})
+
+        assert resp.status_code == 503
+        assert resp.json()["detail"] == "回答済ステータスが設定されていません"
+
 
 class TestClaimTicket:
     """テストケース: ログインユーザーへの担当割り当て"""
@@ -265,6 +292,16 @@ class TestClaimTicket:
             update_request.content
             == b'{"issue":{"assigned_to_id":7,"status_id":2}}'
         )
+
+    def test_sales_user_cannot_claim_ticket(self, client: TestClient):
+        store = app.dependency_overrides[get_session_store]()
+        store.sessions["test-session"] = replace(
+            store.sessions["test-session"], redmine_user_id=8
+        )
+
+        resp = client.patch("/tickets/100/assignee")
+
+        assert resp.status_code == 403
 
 
 class TestUpdateStatus:

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Routes, Route } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import { Navbar } from './components/Navbar'
 import { TicketList } from './pages/TicketList'
 import { TicketDetail } from './pages/TicketDetail'
@@ -7,6 +7,7 @@ import { TicketCreate } from './pages/TicketCreate'
 import { AnswerTicketList } from './pages/AnswerTicketList'
 import { Login } from './pages/Login'
 import { AuthUser, getSession, logout } from './api/client'
+import { RequireCapability } from './components/RequireCapability'
 
 function App() {
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -31,10 +32,22 @@ function App() {
       <Navbar user={user} onLogout={handleLogout} />
       <main className="container">
         <Routes>
-          <Route path="/" element={<TicketList />} />
-          <Route path="/create" element={<TicketCreate />} />
+          <Route path="/" element={
+            <RequireCapability user={user} capability="tickets:list">
+              <TicketList />
+            </RequireCapability>
+          } />
+          <Route path="/create" element={
+            <RequireCapability user={user} capability="tickets:create" redirectTo="/">
+              <TicketCreate />
+            </RequireCapability>
+          } />
           <Route path="/tickets/:id" element={<TicketDetail user={user} />} />
-          <Route path="/answer" element={user.is_support ? <AnswerTicketList /> : <Navigate to="/" replace />} />
+          <Route path="/answer" element={
+            <RequireCapability user={user} capability="tickets:answer" redirectTo="/">
+              <AnswerTicketList />
+            </RequireCapability>
+          } />
         </Routes>
       </main>
     </div>

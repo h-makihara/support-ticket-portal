@@ -23,8 +23,7 @@ export interface AuthUser {
   id: number
   username: string
   name: string
-  is_support: boolean
-  is_sales: boolean
+  roles: string[]
 }
 
 export interface AuthSession {

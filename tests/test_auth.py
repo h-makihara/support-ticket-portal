@@ -1,5 +1,7 @@
 """Authentication and session API tests."""
 
+from dataclasses import replace
+
 import httpx
 import respx
 from fastapi.testclient import TestClient
@@ -24,9 +26,20 @@ def test_current_session_does_not_expose_api_key(client: TestClient):
     response = client.get("/auth/session")
     assert response.status_code == 200
     assert response.json()["user"]["username"] == "test-user"
-    assert response.json()["user"]["is_support"] is True
-    assert response.json()["user"]["is_sales"] is False
+    assert response.json()["user"]["roles"] == ["support"]
     assert "api_key" not in response.text
+
+
+def test_current_session_returns_canonical_sales_role(client: TestClient):
+    store = app.dependency_overrides[get_session_store]()
+    store.sessions["test-session"] = replace(
+        store.sessions["test-session"], redmine_user_id=8
+    )
+
+    response = client.get("/auth/session")
+
+    assert response.status_code == 200
+    assert response.json()["user"]["roles"] == ["sales"]
 
 
 def test_logout_deletes_session(client: TestClient):

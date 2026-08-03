@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { getTicket, addComment, answerTicket, updateStatus, getTicketStatusOptions, AuthUser, Ticket, TicketStatusOption, AuditEntry } from '../api/client'
 import { AuditLog } from '../components/AuditLog'
+import { hasCapability } from '../authz'
 
 export function TicketDetail({ user }: { user: AuthUser }) {
   const { id } = useParams<{ id: string }>()
@@ -155,7 +156,7 @@ export function TicketDetail({ user }: { user: AuthUser }) {
           <button className="btn btn-primary" onClick={handleComment} disabled={!comment.trim() || submitting}>
             送信
           </button>
-          {user.is_support && (
+          {hasCapability(user, 'tickets:answer') && (
             <button className="btn btn-success" onClick={handleAnswer} disabled={!comment.trim() || submitting}>
               回答
             </button>

@@ -103,6 +103,13 @@ _status_by_name: Dict[str, int] = {}
 _status_by_id: Dict[int, str] = {}
 _status_by_key: Dict[str, int] = {}
 
+ROLE_SALES = "sales"
+ROLE_SUPPORT = "support"
+_ROLE_BY_REDMINE_NAME = {
+    "営業担当者": ROLE_SALES,
+    "サポート担当者": ROLE_SUPPORT,
+}
+
 # Mapping: English filter key (used by frontend) → set of Redmine slug/name matches.
 # This is filled dynamically at startup by querying /issue_statuses.json.
 _ENGLISH_KEY_MATCHERS: Dict[str, set] = {
@@ -418,7 +425,8 @@ async def _support_user_ids() -> set[int]:
                 user = membership.get("user")
                 roles = membership.get("roles", [])
                 if user and any(
-                    role.get("name") == "サポート担当者" for role in roles
+                    _ROLE_BY_REDMINE_NAME.get(role.get("name")) == ROLE_SUPPORT
+                    for role in roles
                 ):
                     support_ids.add(int(user["id"]))
 
@@ -430,13 +438,8 @@ async def _support_user_ids() -> set[int]:
     return support_ids
 
 
-async def _is_support_user(user_id: int) -> bool:
-    """Return whether a Redmine user has the support role in this project."""
-    return user_id in await _support_user_ids()
-
-
-async def _user_role_names(user_id: int) -> set[str]:
-    """Return the current project role names for a Redmine user."""
+async def _user_roles(user_id: int) -> set[str]:
+    """Return canonical portal roles for a Redmine project member."""
     offset = 0
     limit = 100
     async with httpx.AsyncClient(
@@ -457,9 +460,13 @@ async def _user_role_names(user_id: int) -> set[str]:
                 user = membership.get("user")
                 if user and int(user["id"]) == user_id:
                     return {
-                        role.get("name", "")
+                        portal_role
                         for role in membership.get("roles", [])
-                        if role.get("name")
+                        if (
+                            portal_role := _ROLE_BY_REDMINE_NAME.get(
+                                role.get("name", "")
+                            )
+                        )
                     }
             offset += len(memberships)
             if not memberships or offset >= int(
@@ -467,6 +474,37 @@ async def _user_role_names(user_id: int) -> set[str]:
             ):
                 break
     return set()
+
+
+async def _session_user(session: SessionData) -> Dict[str, Any]:
+    """Build the public session user payload without exposing credentials."""
+    try:
+        roles = await _user_roles(session.redmine_user_id)
+    except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
+        roles = set()
+    return {
+        "id": session.redmine_user_id,
+        "username": session.username,
+        "name": session.name,
+        "roles": sorted(roles),
+    }
+
+
+async def _required_user_roles(user_id: int) -> set[str]:
+    """Load portal roles or fail closed when Redmine cannot verify them."""
+    try:
+        return await _user_roles(user_id)
+    except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
+        raise HTTPException(
+            status_code=503,
+            detail="ユーザーのロールを確認できませんでした",
+        ) from None
+
+
+async def _require_support_role(user_id: int) -> None:
+    """Require the support role for responder-only operations."""
+    if ROLE_SUPPORT not in await _required_user_roles(user_id):
+        raise HTTPException(status_code=403, detail="サポートロールが必要です")
 
 
 async def _project_user_names() -> Dict[int, str]:
@@ -543,37 +581,17 @@ async def login(
         samesite="lax",
         path="/",
     )
-    try:
-        roles = await _user_role_names(session.redmine_user_id)
-    except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
-        roles = set()
     return {
         "authenticated": True,
-        "user": {
-            "id": session.redmine_user_id,
-            "username": session.username,
-            "name": session.name,
-            "is_support": "サポート担当者" in roles,
-            "is_sales": "営業担当者" in roles,
-        },
+        "user": await _session_user(session),
     }
 
 
 @app.get("/auth/session")
 async def current_session(session: SessionData = Depends(require_session)):
-    try:
-        roles = await _user_role_names(session.redmine_user_id)
-    except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
-        roles = set()
     return {
         "authenticated": True,
-        "user": {
-            "id": session.redmine_user_id,
-            "username": session.username,
-            "name": session.name,
-            "is_support": "サポート担当者" in roles,
-            "is_sales": "営業担当者" in roles,
-        },
+        "user": await _session_user(session),
     }
 
 
@@ -643,15 +661,9 @@ async def list_tickets(
         qs = dict(request.query_params)
         status_key = qs.get("status", "")
         responder_view = qs.get("view") == "responder"
-        try:
-            roles = await _user_role_names(session.redmine_user_id)
-        except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
-            raise HTTPException(
-                status_code=503,
-                detail="ユーザーのロールを確認できませんでした",
-            ) from None
-        is_support = "サポート担当者" in roles
-        is_sales = "営業担当者" in roles
+        roles = await _required_user_roles(session.redmine_user_id)
+        is_support = ROLE_SUPPORT in roles
+        is_sales = ROLE_SALES in roles
         if responder_view and not is_support:
             raise HTTPException(status_code=403, detail="サポートロールが必要です")
         if not is_support and not is_sales:
@@ -826,15 +838,7 @@ async def answer_ticket(
         if not body:
             return JSONResponse(status_code=422, content={"detail": "body is required"})
 
-        try:
-            is_support = await _is_support_user(session.redmine_user_id)
-        except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
-            raise HTTPException(
-                status_code=503,
-                detail="サポートロールを確認できませんでした",
-            ) from None
-        if not is_support:
-            raise HTTPException(status_code=403, detail="サポートロールが必要です")
+        await _require_support_role(session.redmine_user_id)
 
         answered_status_id = _resolve_status_id("answered")
         if answered_status_id is None:
@@ -888,6 +892,7 @@ async def claim_ticket(
 ):
     """Assign a ticket to the currently signed-in Redmine user."""
     with tracer.start_as_current_span("claim_ticket") as span:
+        await _require_support_role(session.redmine_user_id)
         span.set_attribute("ticket.id", ticket_id)
         span.set_attribute("assignee.id", session.redmine_user_id)
         in_progress_id = _resolve_status_id("in_progress")
