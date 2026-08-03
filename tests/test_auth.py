@@ -24,6 +24,8 @@ def test_current_session_does_not_expose_api_key(client: TestClient):
     response = client.get("/auth/session")
     assert response.status_code == 200
     assert response.json()["user"]["username"] == "test-user"
+    assert response.json()["user"]["is_support"] is True
+    assert response.json()["user"]["is_sales"] is False
     assert "api_key" not in response.text
 
 

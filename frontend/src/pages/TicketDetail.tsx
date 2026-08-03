@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { getTicket, addComment, updateStatus, getTicketStatusOptions, Ticket, TicketStatusOption, AuditEntry } from '../api/client'
+import { getTicket, addComment, answerTicket, updateStatus, getTicketStatusOptions, AuthUser, Ticket, TicketStatusOption, AuditEntry } from '../api/client'
 import { AuditLog } from '../components/AuditLog'
 
-export function TicketDetail() {
+export function TicketDetail({ user }: { user: AuthUser }) {
   const { id } = useParams<{ id: string }>()
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [auditLog, setAuditLog] = useState<AuditEntry[]>([])
@@ -12,6 +12,7 @@ export function TicketDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [statusOptions, setStatusOptions] = useState<TicketStatusOption[]>([])
+  const [submitting, setSubmitting] = useState(false)
 
   const loadTicketData = async () => {
     if (!id) return
@@ -44,6 +45,7 @@ export function TicketDetail() {
 
   const handleComment = async () => {
     if (!id || !comment.trim()) return
+    setSubmitting(true)
     try {
       await addComment(parseInt(id), comment)
       setComment('')
@@ -52,6 +54,24 @@ export function TicketDetail() {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'コメントの追加に失敗しました'
       setError(msg)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleAnswer = async () => {
+    if (!id || !comment.trim()) return
+    setSubmitting(true)
+    try {
+      await answerTicket(parseInt(id), comment)
+      setComment('')
+      setError(null)
+      await loadTicketData()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '回答の追加に失敗しました'
+      setError(msg)
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -131,9 +151,16 @@ export function TicketDetail() {
             placeholder="コメントを入力..."
           />
         </div>
-        <button className="btn btn-primary" onClick={handleComment} disabled={!comment.trim()}>
-          送信
-        </button>
+        <div className="comment-actions">
+          <button className="btn btn-primary" onClick={handleComment} disabled={!comment.trim() || submitting}>
+            送信
+          </button>
+          {user.is_support && (
+            <button className="btn btn-success" onClick={handleAnswer} disabled={!comment.trim() || submitting}>
+              回答
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Status change form */}

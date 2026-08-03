@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Navigate, Routes, Route } from 'react-router-dom'
 import { Navbar } from './components/Navbar'
 import { TicketList } from './pages/TicketList'
 import { TicketDetail } from './pages/TicketDetail'
@@ -33,8 +33,8 @@ function App() {
         <Routes>
           <Route path="/" element={<TicketList />} />
           <Route path="/create" element={<TicketCreate />} />
-          <Route path="/tickets/:id" element={<TicketDetail />} />
-          <Route path="/answer" element={<AnswerTicketList />} />
+          <Route path="/tickets/:id" element={<TicketDetail user={user} />} />
+          <Route path="/answer" element={user.is_support ? <AnswerTicketList /> : <Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>

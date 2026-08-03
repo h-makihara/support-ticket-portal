@@ -1,7 +1,17 @@
 """Unit tests for status-related functionality."""
 
+import httpx
+import pytest
+import respx
 from fastapi.testclient import TestClient
-from src.backend.app import _fetch_statuses, _resolve_status_id, _status_by_key
+from src.backend.app import (
+    REDMINE_BASE_URL,
+    _fetch_statuses,
+    _resolve_status_id,
+    _status_by_id,
+    _status_by_key,
+    _status_by_name,
+)
 
 
 class TestStatusOptions:
@@ -53,3 +63,31 @@ class TestStatusResolution:
         """正常系: 未知のキーは None を返す"""
         result = _resolve_status_id("unknown_key_12345")
         assert result is None
+
+
+@pytest.mark.asyncio
+async def test_empty_status_response_uses_default_fallback():
+    """起動中の空レスポンスでも必須ステータスを解決できる。"""
+    saved = (
+        _status_by_key.copy(),
+        _status_by_id.copy(),
+        _status_by_name.copy(),
+    )
+    try:
+        _status_by_key.clear()
+        _status_by_id.clear()
+        _status_by_name.clear()
+
+        with respx.mock:
+            respx.get(f"{REDMINE_BASE_URL}/issue_statuses.json").mock(
+                return_value=httpx.Response(200, json={"issue_statuses": []})
+            )
+            await _fetch_statuses()
+
+        assert _resolve_status_id("in_progress") == 2
+    finally:
+        for cache, previous in zip(
+            (_status_by_key, _status_by_id, _status_by_name), saved
+        ):
+            cache.clear()
+            cache.update(previous)

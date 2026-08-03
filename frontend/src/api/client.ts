@@ -23,6 +23,8 @@ export interface AuthUser {
   id: number
   username: string
   name: string
+  is_support: boolean
+  is_sales: boolean
 }
 
 export interface AuthSession {
@@ -105,6 +107,13 @@ export async function createTicket(data: { subject: string; description: string;
 
 export async function addComment(ticketId: number, body: string): Promise<void> {
   await request(`/tickets/${ticketId}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  })
+}
+
+export async function answerTicket(ticketId: number, body: string): Promise<void> {
+  await request(`/tickets/${ticketId}/answer`, {
     method: 'POST',
     body: JSON.stringify({ body }),
   })

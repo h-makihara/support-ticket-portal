@@ -1,7 +1,12 @@
 """Unit tests for ticket CRUD endpoints."""
 
+import json
+from dataclasses import replace
+
 import respx
 from fastapi.testclient import TestClient
+
+from src.backend.app import app, get_session_store
 
 
 class TestCreateTicket:
@@ -109,6 +114,29 @@ class TestListTickets:
         )
         assert issues_request.url.params["status_id"] == "open"
 
+    def test_sales_user_only_sees_authored_or_assigned_tickets(
+        self, client: TestClient
+    ):
+        store = app.dependency_overrides[get_session_store]()
+        store.sessions["test-session"] = replace(
+            store.sessions["test-session"], redmine_user_id=8
+        )
+
+        resp = client.get("/tickets")
+
+        assert resp.status_code == 200
+        assert [ticket["id"] for ticket in resp.json()["tickets"]] == [100]
+
+    def test_sales_user_cannot_open_responder_view(self, client: TestClient):
+        store = app.dependency_overrides[get_session_store]()
+        store.sessions["test-session"] = replace(
+            store.sessions["test-session"], redmine_user_id=8
+        )
+
+        resp = client.get("/tickets?view=responder")
+
+        assert resp.status_code == 403
+
     def test_list_tickets_empty_project(self, client: TestClient):
         """境界条件: 該当チケットが0件の場合"""
         # Unknown status filter should return empty or all depending on implementation
@@ -181,6 +209,42 @@ class TestAddComment:
     def test_add_comment_whitespace_only_body(self, client: TestClient):
         resp = client.post("/tickets/100/comments", json={"body": " \n\t "})
         assert resp.status_code == 422
+
+
+class TestAnswerTicket:
+    def test_support_user_adds_answer_and_assigns_ticket_author(
+        self, client: TestClient
+    ):
+        resp = client.post("/tickets/100/answer", json={"body": "回答です"})
+        assert resp.status_code == 200
+
+        update_request = next(
+            call.request
+            for call in reversed(respx.calls)
+            if call.request.method == "PUT"
+            and call.request.url.path == "/issues/100.json"
+        )
+        assert json.loads(update_request.content) == {
+            "issue": {
+                "notes": "回答です",
+                "assigned_to_id": 8,
+                "status_id": 3,
+            }
+        }
+
+    def test_answer_rejects_empty_body(self, client: TestClient):
+        resp = client.post("/tickets/100/answer", json={"body": "  "})
+        assert resp.status_code == 422
+
+    def test_answer_rejects_non_support_user(self, client: TestClient):
+        store = app.dependency_overrides[get_session_store]()
+        store.sessions["test-session"] = replace(
+            store.sessions["test-session"], redmine_user_id=8
+        )
+
+        resp = client.post("/tickets/100/answer", json={"body": "回答です"})
+
+        assert resp.status_code == 403
 
 
 class TestClaimTicket:

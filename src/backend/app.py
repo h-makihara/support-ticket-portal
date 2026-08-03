@@ -154,7 +154,11 @@ async def _fetch_statuses() -> None:
             if not body:
                 raise ValueError("Empty response from Redmine")
 
-            for s in r.json().get("issue_statuses", []):
+            statuses = r.json().get("issue_statuses", [])
+            if not statuses:
+                raise ValueError("No issue statuses returned from Redmine")
+
+            for s in statuses:
                 sid = int(s["id"])
                 name = s.get("name", "")
                 normalized_name = name.strip().casefold()
@@ -426,6 +430,45 @@ async def _support_user_ids() -> set[int]:
     return support_ids
 
 
+async def _is_support_user(user_id: int) -> bool:
+    """Return whether a Redmine user has the support role in this project."""
+    return user_id in await _support_user_ids()
+
+
+async def _user_role_names(user_id: int) -> set[str]:
+    """Return the current project role names for a Redmine user."""
+    offset = 0
+    limit = 100
+    async with httpx.AsyncClient(
+        base_url=REDMINE_BASE_URL, headers=HEADERS, timeout=10.0
+    ) as client:
+        while True:
+            response = await client.get(
+                f"/projects/{REDMINE_PROJECT_ID}/memberships.json",
+                params={"limit": limit, "offset": offset},
+            )
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"GET project memberships failed: {response.status_code}"
+                )
+            body = response.json()
+            memberships = body.get("memberships", [])
+            for membership in memberships:
+                user = membership.get("user")
+                if user and int(user["id"]) == user_id:
+                    return {
+                        role.get("name", "")
+                        for role in membership.get("roles", [])
+                        if role.get("name")
+                    }
+            offset += len(memberships)
+            if not memberships or offset >= int(
+                body.get("total_count", len(memberships))
+            ):
+                break
+    return set()
+
+
 async def _project_user_names() -> Dict[int, str]:
     """Return a user ID to display name map for the current project."""
     names: Dict[int, str] = {}
@@ -500,24 +543,36 @@ async def login(
         samesite="lax",
         path="/",
     )
+    try:
+        roles = await _user_role_names(session.redmine_user_id)
+    except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
+        roles = set()
     return {
         "authenticated": True,
         "user": {
             "id": session.redmine_user_id,
             "username": session.username,
             "name": session.name,
+            "is_support": "サポート担当者" in roles,
+            "is_sales": "営業担当者" in roles,
         },
     }
 
 
 @app.get("/auth/session")
 async def current_session(session: SessionData = Depends(require_session)):
+    try:
+        roles = await _user_role_names(session.redmine_user_id)
+    except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
+        roles = set()
     return {
         "authenticated": True,
         "user": {
             "id": session.redmine_user_id,
             "username": session.username,
             "name": session.name,
+            "is_support": "サポート担当者" in roles,
+            "is_sales": "営業担当者" in roles,
         },
     }
 
@@ -588,6 +643,19 @@ async def list_tickets(
         qs = dict(request.query_params)
         status_key = qs.get("status", "")
         responder_view = qs.get("view") == "responder"
+        try:
+            roles = await _user_role_names(session.redmine_user_id)
+        except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
+            raise HTTPException(
+                status_code=503,
+                detail="ユーザーのロールを確認できませんでした",
+            ) from None
+        is_support = "サポート担当者" in roles
+        is_sales = "営業担当者" in roles
+        if responder_view and not is_support:
+            raise HTTPException(status_code=403, detail="サポートロールが必要です")
+        if not is_support and not is_sales:
+            raise HTTPException(status_code=403, detail="利用可能なロールがありません")
         if status_key:
             span.set_attribute("filter.status", status_key)
 
@@ -619,8 +687,9 @@ async def list_tickets(
 
         # Responder filtering happens after fetching because Redmine cannot
         # filter assignees by project role.
-        params["limit"] = 1000 if responder_view else limit
-        params["offset"] = 0 if responder_view else offset
+        filters_locally = responder_view or (is_sales and not is_support)
+        params["limit"] = 1000 if filters_locally else limit
+        params["offset"] = 0 if filters_locally else offset
 
         async with _client(session.redmine_api_key) as c:
             r = await c.get("/issues.json", params=params)
@@ -656,6 +725,19 @@ async def list_tickets(
                     and (
                         not issue.get("assigned_to")
                     or int(issue["assigned_to"]["id"]) in support_ids
+                    )
+                ]
+                total_count = len(issues)
+                issues = issues[offset : offset + limit]
+            elif is_sales and not is_support:
+                issues = [
+                    issue
+                    for issue in issues
+                    if (
+                        int(issue.get("author", {}).get("id", -1))
+                        == session.redmine_user_id
+                        or int(issue.get("assigned_to", {}).get("id", -1))
+                        == session.redmine_user_id
                     )
                 ]
                 total_count = len(issues)
@@ -729,6 +811,70 @@ async def add_comment(
             if r.status_code not in (200, 204):
                 return JSONResponse(status_code=r.status_code, content={"detail": r.text})
             return {"detail": "Comment added"}
+
+
+@app.post("/tickets/{ticket_id}/answer")
+async def answer_ticket(
+    ticket_id: int,
+    comment_data: AddCommentRequest,
+    session: SessionData = Depends(require_session),
+):
+    """Add an answer and return the ticket to the user who created it."""
+    with tracer.start_as_current_span("answer_ticket") as span:
+        span.set_attribute("ticket.id", ticket_id)
+        body = comment_data.body.strip()
+        if not body:
+            return JSONResponse(status_code=422, content={"detail": "body is required"})
+
+        try:
+            is_support = await _is_support_user(session.redmine_user_id)
+        except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
+            raise HTTPException(
+                status_code=503,
+                detail="サポートロールを確認できませんでした",
+            ) from None
+        if not is_support:
+            raise HTTPException(status_code=403, detail="サポートロールが必要です")
+
+        answered_status_id = _resolve_status_id("answered")
+        if answered_status_id is None:
+            raise HTTPException(
+                status_code=503,
+                detail="回答済ステータスが設定されていません",
+            )
+
+        async with _client(session.redmine_api_key) as client:
+            issue_response = await client.get(f"/issues/{ticket_id}.json")
+            span.set_attribute("redmine.get_status", issue_response.status_code)
+            if issue_response.status_code != 200:
+                return JSONResponse(
+                    status_code=issue_response.status_code,
+                    content={"detail": issue_response.text},
+                )
+
+            author = issue_response.json()["issue"].get("author")
+            if not author or author.get("id") is None:
+                return JSONResponse(
+                    status_code=409,
+                    content={"detail": "チケットの起票者を取得できませんでした"},
+                )
+
+            payload = {
+                "issue": {
+                    "notes": body,
+                    "assigned_to_id": int(author["id"]),
+                    "status_id": answered_status_id,
+                }
+            }
+            response = await client.put(f"/issues/{ticket_id}.json", json=payload)
+
+        span.set_attribute("redmine.status", response.status_code)
+        if response.status_code not in (200, 204):
+            return JSONResponse(
+                status_code=response.status_code,
+                content={"detail": response.text},
+            )
+        return {"detail": "Answer added; ticket assigned to author and marked answered"}
 
 
 class UpdateStatusRequest(BaseModel):

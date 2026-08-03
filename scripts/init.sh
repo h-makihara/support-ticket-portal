@@ -30,7 +30,10 @@ python3 scripts/init_redmine.py
 
 # ── 3. Backend & Frontend を起動 ──────────────────────────────────
 echo "[Step 3] Starting backend, frontend, tempo ..."
-docker compose up -d backend frontend tempo
+# init_redmine.py may have replaced the .env values and bootstrapped statuses
+# after an already-running backend populated its in-memory cache. Recreate the
+# backend so it always starts with the freshly initialized Redmine data.
+docker compose up -d --force-recreate backend frontend tempo
 
 echo ""
 echo "============================================================"
