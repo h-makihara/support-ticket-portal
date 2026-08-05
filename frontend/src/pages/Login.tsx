@@ -24,9 +24,10 @@ export function Login({ onLogin }: { onLogin: (user: AuthUser) => void }) {
   return (
     <main className="login-page">
       <form className="login-card" onSubmit={submit}>
-        <div className="login-brand">社内問い合わせチケット管理</div>
-        <h1>ログイン</h1>
-        <p className="login-help">Redmine のアカウントでログインしてください。</p>
+        <div className="login-brand"><span className="brand-mark" aria-hidden="true">S</span> Support Portal</div>
+        <p className="login-eyebrow">社内問い合わせチケット管理</p>
+        <h1>おかえりなさい。</h1>
+        <p className="login-help">Redmine のアカウントで続けます。</p>
         {error && <div className="error" role="alert">{error}</div>}
         <div className="form-group">
           <label htmlFor="username">ユーザー名</label>
