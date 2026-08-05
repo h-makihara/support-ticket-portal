@@ -28,6 +28,19 @@ class TestCreateTicket:
         assert data["id"] == 100
         assert data["subject"] == "テスト件名"
         assert "audit_log" not in data or len(data.get("audit_log", [])) == 0
+        request = next(
+            call.request
+            for call in respx.calls
+            if call.request.method == "POST" and call.request.url.path == "/issues.json"
+        )
+        assert json.loads(request.content)["issue"]["tracker_id"] == 4
+        assert json.loads(request.content)["issue"]["custom_fields"] == [
+            {"id": 11, "value": ""},
+            {"id": 12, "value": "0"},
+            {"id": 13, "value": "0"},
+            {"id": 14, "value": "0"},
+            {"id": 15, "value": "0"},
+        ]
 
     def test_create_ticket_missing_subject(self, client: TestClient):
         """異常系: subject が省略されていると422エラー"""
@@ -52,8 +65,8 @@ class TestCreateTicket:
         )
         assert resp.status_code == 422
 
-    def test_create_ticket_with_tracker_id(self, client: TestClient):
-        """正常系: tracker_id を指定して作成"""
+    def test_create_ticket_maps_client_tracker_id_to_inquiry_tracker(self, client: TestClient):
+        """Bug の tracker_id が指定されても問い合わせへマッピングする。"""
         payload = {
             "subject": "テスト",
             "description": "テスト本文",
@@ -61,6 +74,12 @@ class TestCreateTicket:
         }
         resp = client.post("/tickets", json=payload)
         assert resp.status_code == 200
+        request = next(
+            call.request
+            for call in respx.calls
+            if call.request.method == "POST" and call.request.url.path == "/issues.json"
+        )
+        assert json.loads(request.content)["issue"]["tracker_id"] == 4
 
 
 class TestListTickets:
@@ -175,6 +194,28 @@ class TestGetTicket:
         first_entry = data["audit_log"][0] if data["audit_log"] else {}
         assert first_entry.get("type") in ("comment", "change", "both")
 
+    def test_custom_field_audit_uses_ui_labels_and_boolean_text(self, client: TestClient):
+        changes = [
+            change
+            for entry in client.get("/tickets/100").json()["audit_log"]
+            for change in entry["changes"]
+            if change["field"] in ("report_required", "report_delivered")
+        ]
+        assert changes == [
+            {
+                "field": "report_required",
+                "display_field": "報告書が必要",
+                "old_value": "いいえ",
+                "new_value": "はい",
+            },
+            {
+                "field": "report_delivered",
+                "display_field": "報告書を渡した",
+                "old_value": "いいえ",
+                "new_value": "はい",
+            },
+        ]
+
     def test_get_ticket_resolves_assignee_name_in_audit_log(
         self, client: TestClient
     ):
@@ -222,6 +263,49 @@ class TestAddComment:
         resp = client.post("/tickets/100/comments", json={"body": " \n\t "})
         assert resp.status_code == 422
 
+
+class TestCustomFields:
+    def test_support_sees_and_updates_all_fields(self, client: TestClient):
+        detail = client.get("/tickets/100")
+        assert detail.json()["customer_id"] == "C-100"
+        assert detail.json()["report_required"] is True
+        assert detail.json()["report_delivered"] is False
+        assert detail.json()["schedule_assigned"] is False
+
+        response = client.patch(
+            "/tickets/100/custom-fields",
+            json={"customer_id": " C-200 ", "report_delivered": True},
+        )
+        assert response.status_code == 200
+        update_request = next(
+            call.request for call in reversed(respx.calls)
+            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
+        )
+        assert json.loads(update_request.content) == {"issue": {"custom_fields": [
+            {"id": 11, "value": "C-200"},
+            {"id": 13, "value": "1"},
+        ]}}
+
+    def test_sales_cannot_see_or_update_support_only_fields(self, client: TestClient):
+        store = app.dependency_overrides[get_session_store]()
+        store.sessions["test-session"] = replace(
+            store.sessions["test-session"], redmine_user_id=8
+        )
+        detail = client.get("/tickets/100")
+        assert "report_delivered" not in detail.json()
+        assert "schedule_assigned" not in detail.json()
+        audit_fields = {
+            change["field"]
+            for entry in detail.json()["audit_log"]
+            for change in entry["changes"]
+        }
+        assert "report_required" in audit_fields
+        assert "report_delivered" not in audit_fields
+
+        response = client.patch(
+            "/tickets/100/custom-fields", json={"report_delivered": True}
+        )
+        assert response.status_code == 403
 
 class TestAnswerTicket:
     def test_support_user_adds_answer_and_assigns_ticket_author(

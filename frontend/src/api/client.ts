@@ -60,6 +60,11 @@ export interface Ticket {
   updated_on?: string
   notes?: Array<{ body: string; author: string; created_on: string }>
   audit_log?: AuditEntry[]
+  customer_id: string
+  report_required: boolean
+  report_delivered?: boolean
+  customer_visit_required: boolean
+  schedule_assigned?: boolean
 }
 
 export interface PaginationInfo {
@@ -97,9 +102,24 @@ export async function getTicket(id: number): Promise<Ticket> {
   return request<Ticket>(`/tickets/${id}`)
 }
 
-export async function createTicket(data: { subject: string; description: string; priority?: number }): Promise<Ticket> {
+export interface TicketCustomFields {
+  customer_id: string
+  report_required: boolean
+  report_delivered?: boolean
+  customer_visit_required: boolean
+  schedule_assigned?: boolean
+}
+
+export async function createTicket(data: { subject: string; description: string; priority?: number } & TicketCustomFields): Promise<Ticket> {
   return request<Ticket>('/tickets', {
     method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateTicketCustomFields(ticketId: number, data: Partial<TicketCustomFields>): Promise<void> {
+  await request(`/tickets/${ticketId}/custom-fields`, {
+    method: 'PATCH',
     body: JSON.stringify(data),
   })
 }

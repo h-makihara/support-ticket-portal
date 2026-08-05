@@ -132,6 +132,23 @@ body {
   min-height: 100px;
 }
 
+.custom-field-checks {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.custom-field-checks label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.custom-field-checks input {
+  width: 1rem;
+  height: 1rem;
+}
+
 /* Buttons */
 .btn {
   padding: 0.75rem 1.5rem;
@@ -232,6 +249,69 @@ body {
   font-size: 0.875rem;
   color: #666;
   margin-bottom: 0.5rem;
+}
+
+.audit-changes-table-wrap {
+  width: 100%;
+  margin-top: 0.75rem;
+  overflow-x: auto;
+  border: 1px solid #e3e8ec;
+  border-radius: 6px;
+}
+
+.audit-changes-table {
+  width: 100%;
+  min-width: 540px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.audit-changes-table .audit-field-column {
+  width: 40%;
+}
+
+.audit-changes-table .audit-value-column {
+  width: 30%;
+}
+
+.audit-changes-table th,
+.audit-changes-table td {
+  padding: 0.65rem 0.8rem;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.audit-changes-table th {
+  color: #52616b;
+  background: #f4f7f9;
+  border-bottom: 1px solid #dce3e8;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.audit-changes-table th + th,
+.audit-changes-table td + td {
+  border-left: 1px solid #e8edf0;
+}
+
+.audit-changes-table tbody tr + tr td {
+  border-top: 1px solid #edf1f3;
+}
+
+.audit-changes-table tbody td:first-child,
+.audit-new-value {
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.audit-old-value {
+  color: #7f8c8d;
+}
+
+.audit-changes-table tbody tr:hover {
+  background: #fafcfd;
 }
 
 /* Loading */

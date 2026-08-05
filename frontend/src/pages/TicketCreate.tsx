@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { createTicket } from '../api/client'
+import { AuthUser, createTicket } from '../api/client'
 
 const PRIORITY_OPTIONS = [
   { id: 1, label: '低' },
@@ -10,11 +10,16 @@ const PRIORITY_OPTIONS = [
   { id: 5, label: '最優先' },
 ]
 
-export function TicketCreate() {
+export function TicketCreate({ user }: { user: AuthUser }) {
   const navigate = useNavigate()
   const [subject, setSubject] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState(2)
+  const [customerId, setCustomerId] = useState('')
+  const [reportRequired, setReportRequired] = useState(false)
+  const [reportDelivered, setReportDelivered] = useState(false)
+  const [customerVisitRequired, setCustomerVisitRequired] = useState(false)
+  const [scheduleAssigned, setScheduleAssigned] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -27,7 +32,14 @@ export function TicketCreate() {
     setLoading(true)
     setError(null) // Clear previous errors on new submit
     try {
-      const ticket = await createTicket({ subject, description, priority })
+      const ticket = await createTicket({
+        subject, description, priority,
+        customer_id: customerId,
+        report_required: reportRequired,
+        report_delivered: reportDelivered,
+        customer_visit_required: customerVisitRequired,
+        schedule_assigned: scheduleAssigned,
+      })
       navigate(`/tickets/${ticket.id}`)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'チケットの作成に失敗しました'
@@ -87,6 +99,20 @@ export function TicketCreate() {
                 <option key={opt.id} value={opt.id}>{opt.label}</option>
               ))}
             </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="customer-id">顧客ID</label>
+            <input id="customer-id" type="text" value={customerId} onChange={e => setCustomerId(e.target.value)} disabled={loading} />
+          </div>
+
+          <div className="custom-field-checks">
+            <label><input type="checkbox" checked={reportRequired} onChange={e => setReportRequired(e.target.checked)} disabled={loading} /> 報告書が必要</label>
+            <label><input type="checkbox" checked={customerVisitRequired} onChange={e => setCustomerVisitRequired(e.target.checked)} disabled={loading} /> 客先同行が必要</label>
+            {user.roles.includes('support') && <>
+              <label><input type="checkbox" checked={reportDelivered} onChange={e => setReportDelivered(e.target.checked)} disabled={loading} /> 報告書を渡した</label>
+              <label><input type="checkbox" checked={scheduleAssigned} onChange={e => setScheduleAssigned(e.target.checked)} disabled={loading} /> 予定・担当者をアサインした</label>
+            </>}
           </div>
 
           <button className="btn btn-primary" type="submit" disabled={loading || !subject.trim() || !description.trim()}>

@@ -23,6 +23,8 @@ docker compose up --build -d
 
 `scripts/init_redmine.py` は Redmine の REST API を有効化したうえで、問い合わせプロジェクト・トラッカー・ロールを確認し、実行時に必要な ID と API キーを `.env` へ保存します。
 
+`HTTP_PROXY` / `HTTPS_PROXY` が設定された環境にも対応しています。リモート Redmine へは環境のプロキシを利用し、`localhost` およびループバック IP への初期化通信は認証情報をプロキシへ送らず直接接続します。
+
 一括実行する場合:
 
 ```bash

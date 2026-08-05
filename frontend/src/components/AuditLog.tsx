@@ -132,43 +132,31 @@ export function AuditLog({ entries }: Props) {
 
             {/* Field changes section */}
             {entry.changes.length > 0 && (
-              <table
-                style={{
-                  width: '100%',
-                  marginTop: '0.5rem',
-                  fontSize: '0.9rem',
-                  borderCollapse: 'collapse',
-                }}
-              >
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0' }}>
-                      フィールド
-                    </th>
-                    <th style={{ textAlign: 'left', padding: '0.2rem 0.5rem' }}>
-                      変更前
-                    </th>
-                    <th style={{ textAlign: 'left', padding: '0.2rem 0.5rem 0.2rem 0.5rem' }}>
-                      変更後
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entry.changes.map((c, cidx) => (
-                    <tr key={cidx}>
-                      <td style={{ padding: '0.3rem', fontWeight: 500 }}>
-                        {c.display_field || c.field}
-                      </td>
-                      <td style={{ padding: '0.3rem', color: '#999' }}>
-                        {formatValue(c.old_value)}
-                      </td>
-                      <td style={{ padding: '0.3rem 0.3rem 0.3rem 0.3rem', fontWeight: 500 }}>
-                        {formatValue(c.new_value)}
-                      </td>
+              <div className="audit-changes-table-wrap">
+                <table className="audit-changes-table">
+                  <colgroup>
+                    <col className="audit-field-column" />
+                    <col className="audit-value-column" />
+                    <col className="audit-value-column" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th scope="col">フィールド</th>
+                      <th scope="col">変更前</th>
+                      <th scope="col">変更後</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {entry.changes.map((c, cidx) => (
+                      <tr key={cidx}>
+                        <td>{c.display_field || c.field}</td>
+                        <td className="audit-old-value">{formatValue(c.old_value)}</td>
+                        <td className="audit-new-value">{formatValue(c.new_value)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         ))}

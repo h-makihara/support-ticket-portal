@@ -31,6 +31,19 @@ def test_login_uses_current_user_endpoint_and_returns_api_key():
         assert init_redmine._login(client) == "secret"
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("http://localhost:3000", False),
+        ("http://127.0.0.1:3000", False),
+        ("http://[::1]:3000", False),
+        ("https://redmine.example.com", True),
+    ],
+)
+def test_environment_proxy_is_bypassed_only_for_loopback(url, expected):
+    assert init_redmine._trust_environment_proxy(url) is expected
+
+
 def test_login_reports_disabled_rest_api_without_dumping_html(capsys):
     with client_for(lambda request: httpx.Response(404, text="<html>sensitive proxy page</html>")) as client:
         with pytest.raises(SystemExit):

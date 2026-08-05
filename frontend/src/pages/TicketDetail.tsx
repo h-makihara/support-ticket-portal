@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { getTicket, addComment, answerTicket, updateStatus, getTicketStatusOptions, AuthUser, Ticket, TicketStatusOption, AuditEntry } from '../api/client'
+import { getTicket, addComment, answerTicket, updateStatus, updateTicketCustomFields, getTicketStatusOptions, AuthUser, Ticket, TicketStatusOption, AuditEntry, TicketCustomFields } from '../api/client'
 import { AuditLog } from '../components/AuditLog'
 import { hasCapability } from '../authz'
 
@@ -14,6 +14,7 @@ export function TicketDetail({ user }: { user: AuthUser }) {
   const [error, setError] = useState<string | null>(null)
   const [statusOptions, setStatusOptions] = useState<TicketStatusOption[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [customFields, setCustomFields] = useState<TicketCustomFields | null>(null)
 
   const loadTicketData = async () => {
     if (!id) return
@@ -25,6 +26,13 @@ export function TicketDetail({ user }: { user: AuthUser }) {
         getTicketStatusOptions(),
       ])
       setTicket(t)
+      setCustomFields({
+        customer_id: t.customer_id,
+        report_required: t.report_required,
+        report_delivered: t.report_delivered,
+        customer_visit_required: t.customer_visit_required,
+        schedule_assigned: t.schedule_assigned,
+      })
       setAuditLog(t.audit_log ?? [])
       const options = opts.length > 0
         ? opts
@@ -88,6 +96,20 @@ export function TicketDetail({ user }: { user: AuthUser }) {
     }
   }
 
+  const handleCustomFields = async () => {
+    if (!id || !customFields) return
+    setSubmitting(true)
+    try {
+      await updateTicketCustomFields(parseInt(id), customFields)
+      setError(null)
+      await loadTicketData()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'カスタムフィールドの更新に失敗しました')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   if (loading) return <div className="loading">読み込み中...</div>
 
   // Loading error state with retry button.
@@ -137,6 +159,25 @@ export function TicketDetail({ user }: { user: AuthUser }) {
         </div>
         <div style={{ marginTop: '1rem', whiteSpace: 'pre-wrap' }}>{ticket.description}</div>
       </div>
+
+      {customFields && (
+        <div className="card custom-fields-card">
+          <h3>対応情報</h3>
+          <div className="form-group">
+            <label htmlFor="customer-id">顧客ID</label>
+            <input id="customer-id" type="text" value={customFields.customer_id} onChange={e => setCustomFields({ ...customFields, customer_id: e.target.value })} />
+          </div>
+          <div className="custom-field-checks">
+            <label><input type="checkbox" checked={customFields.report_required} onChange={e => setCustomFields({ ...customFields, report_required: e.target.checked })} /> 報告書が必要</label>
+            <label><input type="checkbox" checked={customFields.customer_visit_required} onChange={e => setCustomFields({ ...customFields, customer_visit_required: e.target.checked })} /> 客先同行が必要</label>
+            {user.roles.includes('support') && <>
+              <label><input type="checkbox" checked={customFields.report_delivered ?? false} onChange={e => setCustomFields({ ...customFields, report_delivered: e.target.checked })} /> 報告書を渡した</label>
+              <label><input type="checkbox" checked={customFields.schedule_assigned ?? false} onChange={e => setCustomFields({ ...customFields, schedule_assigned: e.target.checked })} /> 予定・担当者をアサインした</label>
+            </>}
+          </div>
+          <button className="btn btn-success" onClick={handleCustomFields} disabled={submitting}>対応情報を更新</button>
+        </div>
+      )}
 
       {/* Full audit log with comments + field changes */}
       <AuditLog entries={auditLog} />

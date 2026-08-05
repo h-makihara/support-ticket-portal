@@ -17,8 +17,10 @@ import json
 import os
 import sys
 import time
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -109,10 +111,26 @@ def _post(client: httpx.Client, path: str, api_key: str, data: Dict):
 
 # ── Redmine wait ───────────────────────────────────────────────────
 
+def _trust_environment_proxy(url: str) -> bool:
+    """Use environment proxies except for an explicitly local Redmine URL."""
+    hostname = urlparse(url).hostname
+    if not hostname:
+        return True
+    if hostname.casefold() == "localhost":
+        return False
+    try:
+        return not ip_address(hostname).is_loopback
+    except ValueError:
+        return True
+
+
 def wait_for_redmine(timeout_sec: int = 180):
     print(f"  → Waiting for Redmine at {REDMINE_URL} ...")
     client = httpx.Client(
-        base_url=REDMINE_URL, timeout=10.0, follow_redirects=True
+        base_url=REDMINE_URL,
+        timeout=10.0,
+        follow_redirects=True,
+        trust_env=_trust_environment_proxy(REDMINE_URL),
     )
     deadline = time.time() + timeout_sec
     while time.time() < deadline:

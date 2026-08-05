@@ -81,6 +81,7 @@ HTTPXClientInstrumentor().instrument()
 REDMINE_BASE_URL = os.getenv("REDMINE_BASE_URL", "http://redmine:3000")
 REDMINE_API_KEY = os.getenv("REDMINE_API_KEY", "")
 REDMINE_PROJECT_ID = os.getenv("REDMINE_PROJECT_ID", "")
+REDMINE_TRACKER_ID = os.getenv("REDMINE_TRACKER_ID", "")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "session_id")
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "true").lower() in ("1", "true", "yes")
@@ -90,6 +91,8 @@ if not REDMINE_API_KEY:
     raise RuntimeError("REDMINE_API_KEY must be set")
 if not REDMINE_PROJECT_ID:
     raise RuntimeError("REDMINE_PROJECT_ID must be set")
+if not REDMINE_TRACKER_ID:
+    raise RuntimeError("REDMINE_TRACKER_ID must be set")
 
 HEADERS = {"X-Redmine-API-Key": REDMINE_API_KEY, "Content-Type": "application/json"}
 session_store = SessionStore(REDIS_URL)
@@ -108,6 +111,14 @@ ROLE_SUPPORT = "support"
 _ROLE_BY_REDMINE_NAME = {
     "営業担当者": ROLE_SALES,
     "サポート担当者": ROLE_SUPPORT,
+}
+
+CUSTOM_FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
+    "customer_id": {"name": "顧客ID", "label": "顧客ID", "boolean": False, "support_only": False},
+    "report_required": {"name": "報告書要否", "label": "報告書が必要", "boolean": True, "support_only": False},
+    "report_delivered": {"name": "報告書渡し済み", "label": "報告書を渡した", "boolean": True, "support_only": True},
+    "customer_visit_required": {"name": "客先同行要否", "label": "客先同行が必要", "boolean": True, "support_only": False},
+    "schedule_assigned": {"name": "予定・担当者アサイン済み", "label": "予定・担当者をアサインした", "boolean": True, "support_only": True},
 }
 
 # Mapping: English filter key (used by frontend) → set of Redmine slug/name matches.
@@ -223,10 +234,29 @@ async def require_session(
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
-def _issue_to_dict(i: Dict[str, Any]) -> Dict[str, Any]:
+def _redmine_bool(value: Any) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _issue_custom_fields(i: Dict[str, Any], include_support_only: bool) -> Dict[str, Any]:
+    values_by_name = {
+        field.get("name"): field.get("value")
+        for field in i.get("custom_fields", [])
+        if isinstance(field, dict)
+    }
+    result: Dict[str, Any] = {}
+    for key, definition in CUSTOM_FIELD_DEFINITIONS.items():
+        if definition["support_only"] and not include_support_only:
+            continue
+        value = values_by_name.get(definition["name"], "0" if definition["boolean"] else "")
+        result[key] = _redmine_bool(value) if definition["boolean"] else str(value or "")
+    return result
+
+
+def _issue_to_dict(i: Dict[str, Any], include_support_only: bool = True) -> Dict[str, Any]:
     """Extract common fields from a Redmine issue dict."""
     assigned_to = i.get("assigned_to")
-    return {
+    result = {
         "id": i["id"],
         "subject": i.get("subject", ""),
         "description": i.get("description", ""),
@@ -243,6 +273,8 @@ def _issue_to_dict(i: Dict[str, Any]) -> Dict[str, Any]:
         "created_on": i.get("created_on", ""),
         "updated_on": i.get("updated_on", ""),
     }
+    result.update(_issue_custom_fields(i, include_support_only))
+    return result
 
 
 def _journals_to_notes(journals: List[Dict[str, Any]]) -> List[Dict[str, str]]:
@@ -293,6 +325,7 @@ def _journals_to_audit(
     journals: List[Dict[str, Any]],
     user_names: Optional[Dict[int, str]] = None,
     status_names: Optional[Dict[int, str]] = None,
+    custom_fields: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Convert Redmine journals to audit log entries.
 
@@ -306,13 +339,28 @@ def _journals_to_audit(
     entries: List[Dict[str, Any]] = []
     user_names = user_names or {}
     status_names = status_names or {}
+    custom_fields = custom_fields or {}
+
+    def custom_field_definition(detail: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if detail.get("property") != "cf":
+            return None
+        try:
+            return custom_fields.get(int(detail.get("name", "")))
+        except (TypeError, ValueError):
+            return None
 
     def change_dict(detail: Dict[str, Any]) -> Dict[str, Any]:
         # Redmine 6 uses `name`; older/test payloads may use `prop_key`.
         field = detail.get("name") or detail.get("prop_key", "")
         old_value = detail.get("old_value")
         new_value = detail.get("new_value")
-        if field in ("assigned_to", "assigned_to_id"):
+        custom_definition = custom_field_definition(detail)
+        if custom_definition:
+            field = custom_definition["key"]
+            if custom_definition["boolean"]:
+                old_value = "はい" if _redmine_bool(old_value) else "いいえ"
+                new_value = "はい" if _redmine_bool(new_value) else "いいえ"
+        elif field in ("assigned_to", "assigned_to_id"):
             old_value = _user_name_for_audit(old_value, user_names)
             new_value = _user_name_for_audit(new_value, user_names)
         elif field in ("status", "status_id"):
@@ -320,14 +368,25 @@ def _journals_to_audit(
             new_value = _status_name_for_audit(new_value, status_names)
         return {
             "field": field,
-            "display_field": _field_display_name(field),
+            "display_field": (
+                custom_definition["label"]
+                if custom_definition
+                else _field_display_name(field)
+            ),
             "old_value": old_value,
             "new_value": new_value,
         }
 
     for j in journals:
         body = j.get("notes", "")
-        details = j.get("details", [])
+        details = [
+            detail
+            for detail in j.get("details", [])
+            if not (
+                (definition := custom_field_definition(detail))
+                and definition.get("hidden")
+            )
+        ]
         author_obj = j.get("user")
         author_name = ""
         if isinstance(author_obj, dict):
@@ -537,13 +596,81 @@ async def _project_user_names() -> Dict[int, str]:
     return names
 
 
+async def _custom_field_ids() -> Dict[str, int]:
+    """Resolve configured issue custom fields by name using the service API key."""
+    async with httpx.AsyncClient(
+        base_url=REDMINE_BASE_URL, headers=HEADERS, timeout=10.0
+    ) as client:
+        response = await client.get("/custom_fields.json")
+    if response.status_code != 200:
+        raise HTTPException(status_code=503, detail="カスタムフィールド設定を取得できませんでした")
+    fields = response.json().get("custom_fields", [])
+    ids_by_name = {
+        field.get("name"): int(field["id"])
+        for field in fields
+        if field.get("id") is not None
+    }
+    missing = [
+        definition["name"]
+        for definition in CUSTOM_FIELD_DEFINITIONS.values()
+        if definition["name"] not in ids_by_name
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=503,
+            detail=f"カスタムフィールドが設定されていません: {', '.join(missing)}",
+        )
+    return {
+        key: ids_by_name[definition["name"]]
+        for key, definition in CUSTOM_FIELD_DEFINITIONS.items()
+    }
+
+
+def _custom_fields_payload(values: Dict[str, Any], ids: Dict[str, int]) -> List[Dict[str, Any]]:
+    payload = []
+    for key, value in values.items():
+        definition = CUSTOM_FIELD_DEFINITIONS[key]
+        redmine_value = ("1" if value else "0") if definition["boolean"] else str(value or "")
+        payload.append({"id": ids[key], "value": redmine_value})
+    return payload
+
+
+def _custom_field_audit_metadata(
+    ids: Dict[str, int], include_support_only: bool
+) -> Dict[int, Dict[str, Any]]:
+    return {
+        field_id: {
+            "key": key,
+            "label": definition["label"],
+            "boolean": definition["boolean"],
+            "hidden": definition["support_only"] and not include_support_only,
+        }
+        for key, field_id in ids.items()
+        for definition in [CUSTOM_FIELD_DEFINITIONS[key]]
+    }
+
+
 # ── Endpoints ───────────────────────────────────────────────────────
 
 class CreateTicketRequest(BaseModel):
     subject: str
     description: str
     priority: Optional[int] = None
+    # Backward-compatible input only. Creation always uses the inquiry tracker.
     tracker_id: Optional[int] = None
+    customer_id: str = ""
+    report_required: bool = False
+    report_delivered: bool = False
+    customer_visit_required: bool = False
+    schedule_assigned: bool = False
+
+
+class UpdateCustomFieldsRequest(BaseModel):
+    customer_id: Optional[str] = None
+    report_required: Optional[bool] = None
+    report_delivered: Optional[bool] = None
+    customer_visit_required: Optional[bool] = None
+    schedule_assigned: Optional[bool] = None
 
 
 class LoginRequest(BaseModel):
@@ -621,7 +748,6 @@ async def create_ticket(
         subject = ticket_data.subject.strip()
         description = ticket_data.description.strip()
         priority = ticket_data.priority
-        tracker_id = ticket_data.tracker_id
         span.set_attribute("request.subject", subject)
 
         if not subject or not description:
@@ -630,25 +756,33 @@ async def create_ticket(
                 content={"detail": "subject and description are required"},
             )
 
+        roles = await _required_user_roles(session.redmine_user_id)
+        field_values = {
+            "customer_id": ticket_data.customer_id.strip(),
+            "report_required": ticket_data.report_required,
+            "report_delivered": ticket_data.report_delivered if ROLE_SUPPORT in roles else False,
+            "customer_visit_required": ticket_data.customer_visit_required,
+            "schedule_assigned": ticket_data.schedule_assigned if ROLE_SUPPORT in roles else False,
+        }
+        field_ids = await _custom_field_ids()
         payload = {
             "issue": {
                 "project_id": int(REDMINE_PROJECT_ID),
+                "tracker_id": int(REDMINE_TRACKER_ID),
                 "subject": subject,
                 "description": description,
+                "custom_fields": _custom_fields_payload(field_values, field_ids),
             }
         }
         if priority is not None:
             payload["issue"]["priority_id"] = priority
-        if tracker_id is not None:
-            payload["issue"]["tracker_id"] = tracker_id
-
         async with _client(session.redmine_api_key) as c:
             r = await c.post("/issues.json", json=payload)
             span.set_attribute("redmine.status", r.status_code)
             if r.status_code != 201:
                 return JSONResponse(status_code=r.status_code, content={"detail": r.text})
             issue = r.json()["issue"]
-            result = _issue_to_dict(issue)
+            result = _issue_to_dict(issue, include_support_only=ROLE_SUPPORT in roles)
             logger.info("Created ticket %s", result["id"])
             return result
 
@@ -757,7 +891,7 @@ async def list_tickets(
             else:
                 issues = issues[:limit]
                 total_count = r.json().get("total_count", len(issues))
-            result = [_issue_to_dict(i) for i in issues]
+            result = [_issue_to_dict(i, include_support_only=is_support) for i in issues]
             span.set_attribute("result.count", len(result))
 
             return {
@@ -782,7 +916,9 @@ async def get_ticket(ticket_id: int, session: SessionData = Depends(require_sess
             if r.status_code != 200:
                 return JSONResponse(status_code=r.status_code, content={"detail": r.text})
             i = r.json()["issue"]
-            data = _issue_to_dict(i)
+            roles = await _required_user_roles(session.redmine_user_id)
+            is_support = ROLE_SUPPORT in roles
+            data = _issue_to_dict(i, include_support_only=is_support)
             try:
                 user_names = await _project_user_names()
             except (httpx.HTTPError, ValueError, KeyError):
@@ -796,10 +932,38 @@ async def get_ticket(ticket_id: int, session: SessionData = Depends(require_sess
                 i.get("journals", []),
                 user_names,
                 _status_by_id,
+                _custom_field_audit_metadata(await _custom_field_ids(), is_support),
             )
             # Also provide backward-compatible notes list.
             data["notes"] = _journals_to_notes(i.get("journals", []))
             return data
+
+
+@app.patch("/tickets/{ticket_id}/custom-fields")
+async def update_custom_fields(
+    ticket_id: int,
+    field_data: UpdateCustomFieldsRequest,
+    session: SessionData = Depends(require_session),
+):
+    values = field_data.model_dump(exclude_unset=True)
+    if not values:
+        raise HTTPException(status_code=422, detail="更新するカスタムフィールドがありません")
+
+    roles = await _required_user_roles(session.redmine_user_id)
+    if ROLE_SUPPORT not in roles and any(
+        CUSTOM_FIELD_DEFINITIONS[key]["support_only"] for key in values
+    ):
+        raise HTTPException(status_code=403, detail="サポートロールが必要です")
+    if "customer_id" in values:
+        values["customer_id"] = (values["customer_id"] or "").strip()
+
+    field_ids = await _custom_field_ids()
+    payload = {"issue": {"custom_fields": _custom_fields_payload(values, field_ids)}}
+    async with _client(session.redmine_api_key) as client:
+        response = await client.put(f"/issues/{ticket_id}.json", json=payload)
+    if response.status_code not in (200, 204):
+        return JSONResponse(status_code=response.status_code, content={"detail": response.text})
+    return {"detail": "Custom fields updated"}
 
 
 class AddCommentRequest(BaseModel):

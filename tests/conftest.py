@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("REDMINE_BASE_URL", "http://test-redmine:3000")
 os.environ.setdefault("REDMINE_API_KEY", "test_api_key_12345")
 os.environ.setdefault("REDMINE_PROJECT_ID", "99")
+os.environ.setdefault("REDMINE_TRACKER_ID", "4")
 
 # Import after env vars are set.
 from src.backend.app import app, get_session_store, _status_by_id, _status_by_key, _status_by_name
@@ -88,6 +89,13 @@ MOCK_TICKET_DETAIL: Dict[str, Any] = {
         "assigned_to": {"id": 7, "name": "Test User"},
         "created_on": "2024-01-01T00:00:00Z",
         "updated_on": "2024-01-02T10:00:00Z",
+        "custom_fields": [
+            {"id": 11, "name": "顧客ID", "value": "C-100"},
+            {"id": 12, "name": "報告書要否", "value": "1"},
+            {"id": 13, "name": "報告書渡し済み", "value": "0"},
+            {"id": 14, "name": "客先同行要否", "value": "0"},
+            {"id": 15, "name": "予定・担当者アサイン済み", "value": "0"},
+        ],
         "journals": [
             {
                 "id": 1,
@@ -113,6 +121,16 @@ MOCK_TICKET_DETAIL: Dict[str, Any] = {
                         "old_value": None,
                         "new_value": "7",
                     }
+                ],
+            },
+            {
+                "id": 3,
+                "notes": "",
+                "user": {"name": "support_user"},
+                "created_on": "2024-01-02T11:00:00Z",
+                "details": [
+                    {"property": "cf", "name": "12", "old_value": "0", "new_value": "1"},
+                    {"property": "cf", "name": "13", "old_value": "0", "new_value": "1"},
                 ],
             },
         ],
@@ -155,6 +173,16 @@ def mock_redmine_api():
         # Mock /issue_statuses.json
         respx.get("http://test-redmine:3000/issue_statuses.json").mock(
             return_value=httpx.Response(200, json={"issue_statuses": MOCK_STATUSES})
+        )
+
+        respx.get("http://test-redmine:3000/custom_fields.json").mock(
+            return_value=httpx.Response(200, json={"custom_fields": [
+                {"id": 11, "name": "顧客ID"},
+                {"id": 12, "name": "報告書要否"},
+                {"id": 13, "name": "報告書渡し済み"},
+                {"id": 14, "name": "客先同行要否"},
+                {"id": 15, "name": "予定・担当者アサイン済み"},
+            ]})
         )
 
         # Mock /trackers.json

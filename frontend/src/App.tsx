@@ -39,7 +39,7 @@ function App() {
           } />
           <Route path="/create" element={
             <RequireCapability user={user} capability="tickets:create" redirectTo="/">
-              <TicketCreate />
+              <TicketCreate user={user} />
             </RequireCapability>
           } />
           <Route path="/tickets/:id" element={<TicketDetail user={user} />} />

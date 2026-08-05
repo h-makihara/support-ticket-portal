@@ -67,6 +67,30 @@ project.enabled_module_names = (project.enabled_module_names + ["issue_tracking"
 project.trackers = Tracker.all.to_a
 project.save!
 
+# Portal-specific issue fields. Boolean defaults are explicitly false so both
+# newly created and existing issues have a predictable value in the portal.
+custom_field_definitions = [
+  ["顧客ID", "string", "", false],
+  ["報告書要否", "bool", "0", false],
+  ["報告書渡し済み", "bool", "0", true],
+  ["客先同行要否", "bool", "0", false],
+  ["予定・担当者アサイン済み", "bool", "0", true]
+]
+custom_field_definitions.each do |name, format, default_value, support_only|
+  custom_field = IssueCustomField.find_or_initialize_by(name: name)
+  custom_field.field_format = format
+  custom_field.default_value = default_value
+  custom_field.is_required = false
+  custom_field.is_for_all = false
+  custom_field.trackers = [tracker]
+  custom_field.projects = [project]
+  # Redmine interprets visible=false plus role_ids as visibility restricted to
+  # those roles. The portal API also enforces this boundary independently.
+  custom_field.visible = !support_only
+  custom_field.role_ids = support_only ? [roles.fetch("サポート担当者").id] : []
+  custom_field.save!
+end
+
 # Most complex route:
 # 新規 → 対応中 → 回答済 → 追加質問 → 対応中 → 回答済
 #      → クローズ待ち → クローズ

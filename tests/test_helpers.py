@@ -158,6 +158,54 @@ class TestJournalsToAudit:
         assert change["old_value"] == "対応中"
         assert change["new_value"] == "回答済"
 
+    def test_custom_field_ids_and_boolean_values_are_displayed_as_ui_text(self):
+        journals = [{
+            "notes": "",
+            "user": {"name": "support_user"},
+            "created_on": "2024-01-01T00:00:00Z",
+            "details": [{
+                "property": "cf",
+                "name": "12",
+                "old_value": "0",
+                "new_value": "1",
+            }],
+        }]
+        entries = _journals_to_audit(
+            journals,
+            custom_fields={12: {
+                "key": "report_required",
+                "label": "報告書が必要",
+                "boolean": True,
+                "hidden": False,
+            }},
+        )
+        assert entries[0]["changes"] == [{
+            "field": "report_required",
+            "display_field": "報告書が必要",
+            "old_value": "いいえ",
+            "new_value": "はい",
+        }]
+
+    def test_hidden_custom_field_changes_are_removed(self):
+        journals = [{
+            "notes": "",
+            "user": {"name": "support_user"},
+            "created_on": "2024-01-01T00:00:00Z",
+            "details": [{
+                "property": "cf", "name": "13", "old_value": "0", "new_value": "1",
+            }],
+        }]
+        entries = _journals_to_audit(
+            journals,
+            custom_fields={13: {
+                "key": "report_delivered",
+                "label": "報告書を渡した",
+                "boolean": True,
+                "hidden": True,
+            }},
+        )
+        assert entries == []
+
     def test_both_comment_and_changes(self):
         """正常系: コメントと変更の両方を含む journal が正しく変換される"""
         journals = [
