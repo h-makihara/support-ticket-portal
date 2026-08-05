@@ -59,6 +59,7 @@ h3 { font-size: 21px; font-weight: 600; margin-bottom: 20px; }
 .custom-field-checks label { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 14px; background: var(--parchment); border-radius: 11px; cursor: pointer; }
 .custom-field-checks input { width: 18px; height: 18px; accent-color: var(--blue); }
 .comment-actions { display: flex; gap: 10px; }
+.priority-notice { margin: -4px 0 20px; padding: 12px 14px; color: #0058a8; background: #e8f3ff; border-radius: 11px; font-size: 14px; }
 
 /* Buttons: one blue interaction language */
 .btn { min-height: 40px; padding: 8px 18px; border: 1px solid transparent; border-radius: 999px; cursor: pointer; font-size: 14px; font-weight: 400; transition: transform .15s, background .15s, opacity .15s; }
@@ -84,6 +85,18 @@ h3 { font-size: 21px; font-weight: 600; margin-bottom: 20px; }
 .status-in-progress, .status-対応中 { color: #8a4b00; background: #fff3df; }
 .status-feedback, .status-回答済 { color: #126b3d; background: #e9f7ef; }
 .status-closed, .status-クローズ { color: var(--muted); background: #eeeef0; }
+.priority-badge { display: inline-block; min-width: 48px; padding: 4px 10px; border: 1px solid transparent; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.35; text-align: center; white-space: nowrap; }
+.priority-level-1 { color: #5f6368; background: #f0f0f2; border-color: #dedee3; }
+.priority-level-2 { color: #0058a8; background: #e8f3ff; border-color: #c6e2ff; }
+.priority-level-3 { color: #8a4b00; background: #fff3df; border-color: #ffd99b; }
+.priority-level-4 { color: #b42318; background: #fff0ed; border-color: #fecdca; }
+.priority-level-5 { color: #fff; background: #b42318; border-color: #b42318; }
+.ticket-list-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.ticket-list-toolbar select { width: auto; min-width: 180px; }
+.ticket-count { color: var(--muted); font-size: 14px; }
+.refresh-button { margin-left: auto; }
+.pagination { display: flex; justify-content: center; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
+.pagination .btn { min-width: 40px; padding: 7px 12px; }
 
 .audit-changes-table-wrap { width: 100%; margin-top: 12px; overflow-x: auto; border: 1px solid #e0e0e0; border-radius: 11px; }
 .audit-changes-table { width: 100%; min-width: 540px; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
@@ -130,6 +143,9 @@ h3 { font-size: 21px; font-weight: 600; margin-bottom: 20px; }
   .login-brand { margin-bottom: 40px; }
   .login-card h1 { font-size: 34px; }
   .card { padding: 22px 18px; }
+  .ticket-list-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .ticket-list-toolbar select { width: 100%; }
+  .refresh-button { margin-left: 0; }
   .comment-actions, .confirm-dialog-actions { flex-direction: column-reverse; }
   .comment-actions .btn, .confirm-dialog-actions .btn { width: 100%; }
 }

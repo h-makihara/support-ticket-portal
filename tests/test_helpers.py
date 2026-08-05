@@ -1,10 +1,15 @@
 """Unit tests for backend helper functions."""
 
+import pytest
+from fastapi import HTTPException
+
 from src.backend.app import (
     _journals_to_notes,
     _journals_to_audit,
     _issue_to_dict,
     _field_display_name,
+    _latest_support_responder,
+    _next_priority_id,
 )
 
 
@@ -259,3 +264,34 @@ class TestFieldDisplayName:
     def test_unknown_fields_returned_as_is(self):
         """正常系: 未知のフィールド名はそのまま返される"""
         assert _field_display_name("unknown_field") == "unknown_field"
+
+
+def test_latest_support_responder_uses_most_recent_support_journal():
+    issue = {"journals": [
+        {"created_on": "2026-01-01T10:00:00Z", "user": {"id": 7, "name": "Support A"}},
+        {"created_on": "2026-01-01T11:00:00Z", "user": {"id": 8, "name": "Sales"}},
+        {"created_on": "2026-01-01T12:00:00Z", "user": {"id": 9, "name": "Support B"}},
+    ]}
+
+    assert _latest_support_responder(issue, {7, 9}) == {
+        "id": 9,
+        "name": "Support B",
+    }
+
+
+def test_next_priority_uses_redmine_order_instead_of_incrementing_id():
+    priorities = [
+        {"id": 10, "name": "Low"},
+        {"id": 40, "name": "Normal"},
+        {"id": 90, "name": "High"},
+    ]
+
+    assert _next_priority_id(40, priorities) == 90
+    assert _next_priority_id(90, priorities) == 90
+
+
+def test_next_priority_rejects_an_unknown_current_priority():
+    with pytest.raises(HTTPException) as exc_info:
+        _next_priority_id(999, [{"id": 10}, {"id": 40}])
+
+    assert exc_info.value.status_code == 503

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { claimTicket, getTickets, Ticket, TicketListResponse } from '../api/client'
+import { priorityBadgeClass, priorityLabel } from '../priority'
 
 const PAGE_SIZE = 20
 
@@ -96,6 +97,7 @@ export function AnswerTicketList() {
                 <th>ステータス</th>
                 <th>優先度</th>
                 <th>対応者</th>
+                <th>前回対応者</th>
                 <th>作成日</th>
                 <th>操作</th>
               </tr>
@@ -112,8 +114,9 @@ export function AnswerTicketList() {
                       {ticket.status}
                     </span>
                   </td>
-                  <td>{ticket.priority}</td>
+                  <td><span className={priorityBadgeClass(ticket)}>{priorityLabel(ticket)}</span></td>
                   <td>{ticket.assignee?.name || '未割り当て'}</td>
+                  <td>{ticket.latest_support_responder?.name || '—'}</td>
                   <td>{ticket.created_on ? new Date(ticket.created_on).toLocaleDateString() : '-'}</td>
                   <td>
                     <button

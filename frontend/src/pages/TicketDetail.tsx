@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { getTicket, addComment, answerTicket, updateStatus, updateTicketCustomFields, getTicketStatusOptions, AuthUser, Ticket, TicketStatusOption, AuditEntry, TicketCustomFields } from '../api/client'
+import { getTicket, addComment, answerTicket, updateStatus, updatePriority, updateTicketCustomFields, getTicketStatusOptions, getTicketPriorityOptions, AuthUser, Ticket, TicketStatusOption, TicketPriorityOption, AuditEntry, TicketCustomFields } from '../api/client'
+import { normalizePriorityName, priorityBadgeClass, priorityLabel } from '../priority'
 import { AuditLog } from '../components/AuditLog'
 import { hasCapability } from '../authz'
 
@@ -10,9 +11,11 @@ export function TicketDetail({ user }: { user: AuthUser }) {
   const [auditLog, setAuditLog] = useState<AuditEntry[]>([])
   const [comment, setComment] = useState('')
   const [status, setStatus] = useState('')
+  const [priority, setPriority] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [statusOptions, setStatusOptions] = useState<TicketStatusOption[]>([])
+  const [priorityOptions, setPriorityOptions] = useState<TicketPriorityOption[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [customFields, setCustomFields] = useState<TicketCustomFields | null>(null)
 
@@ -21,9 +24,10 @@ export function TicketDetail({ user }: { user: AuthUser }) {
     setLoading(true)
     setError(null)
     try {
-      const [t, opts] = await Promise.all([
+      const [t, opts, priorities] = await Promise.all([
         getTicket(parseInt(id)),
         getTicketStatusOptions(),
+        getTicketPriorityOptions(),
       ])
       setTicket(t)
       setCustomFields({
@@ -40,6 +44,8 @@ export function TicketDetail({ user }: { user: AuthUser }) {
       setStatusOptions(options)
       const current = options.find(opt => opt.label === t.status)
       setStatus(String(current?.id ?? options[0]?.id ?? ''))
+      setPriorityOptions(priorities)
+      setPriority(String(t.priority))
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'チケットの取得に失敗しました'
       setError(msg)
@@ -93,6 +99,20 @@ export function TicketDetail({ user }: { user: AuthUser }) {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'ステータスの変更に失敗しました'
       setError(msg)
+    }
+  }
+
+  const handlePriority = async (priorityId: number) => {
+    if (!id) return
+    setSubmitting(true)
+    try {
+      await updatePriority(parseInt(id), priorityId)
+      setError(null)
+      await loadTicketData()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '優先度の変更に失敗しました')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -151,7 +171,7 @@ export function TicketDetail({ user }: { user: AuthUser }) {
       <div className="card">
         <h1>{ticket.subject}</h1>
         <div style={{ marginTop: '1rem', color: '#666' }}>
-          <strong>ID:</strong> {ticket.id} | <strong>ステータス:</strong> {ticket.status} | <strong>優先度:</strong> {ticket.priority}
+          <strong>ID:</strong> {ticket.id} | <strong>ステータス:</strong> {ticket.status} | <strong>優先度:</strong> <span className={priorityBadgeClass(ticket)}>{priorityLabel(ticket)}</span>
         </div>
         <div className="ticket-assignee">
           <span>対応者</span>
@@ -203,6 +223,26 @@ export function TicketDetail({ user }: { user: AuthUser }) {
             </button>
           )}
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: '1rem' }}>
+        <h3>優先度変更</h3>
+        <select
+          value={priority}
+          onChange={e => setPriority(e.target.value)}
+          style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #ddd', marginRight: '0.5rem' }}
+        >
+          {priorityOptions.map(opt => (
+            <option key={opt.id} value={opt.id}>{normalizePriorityName(opt.label)}</option>
+          ))}
+        </select>
+        <button
+          className="btn btn-success"
+          onClick={() => handlePriority(parseInt(priority))}
+          disabled={!priority || submitting || parseInt(priority) === ticket.priority}
+        >
+          更新
+        </button>
       </div>
 
       {/* Status change form */}

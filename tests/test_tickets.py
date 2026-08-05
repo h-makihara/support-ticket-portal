@@ -81,6 +81,66 @@ class TestCreateTicket:
         )
         assert json.loads(request.content)["issue"]["tracker_id"] == 4
 
+    def test_sales_requirement_raises_priority_one_level(self, client: TestClient):
+        store = app.dependency_overrides[get_session_store]()
+        store.sessions["test-session"] = replace(
+            store.sessions["test-session"], redmine_user_id=8
+        )
+
+        response = client.post("/tickets", json={
+            "subject": "報告書が必要な問い合わせ",
+            "description": "詳細",
+            "priority": 2,
+            "report_required": True,
+        })
+
+        assert response.status_code == 200
+        request = next(
+            call.request for call in respx.calls
+            if call.request.method == "POST" and call.request.url.path == "/issues.json"
+        )
+        assert json.loads(request.content)["issue"]["priority_id"] == 3
+
+    def test_support_requirement_also_raises_priority_one_level(self, client: TestClient):
+        response = client.post("/tickets", json={
+            "subject": "客先同行が必要な問い合わせ",
+            "description": "詳細",
+            "priority": 2,
+            "customer_visit_required": True,
+        })
+
+        assert response.status_code == 200
+        request = next(
+            call.request for call in respx.calls
+            if call.request.method == "POST" and call.request.url.path == "/issues.json"
+        )
+        assert json.loads(request.content)["issue"]["priority_id"] == 3
+
+    def test_requirement_priority_stays_at_redmine_maximum(self, client: TestClient):
+        response = client.post("/tickets", json={
+            "subject": "最優先の問い合わせ",
+            "description": "詳細",
+            "priority": 5,
+            "report_required": True,
+        })
+
+        assert response.status_code == 200
+        request = next(
+            call.request for call in respx.calls
+            if call.request.method == "POST" and call.request.url.path == "/issues.json"
+        )
+        assert json.loads(request.content)["issue"]["priority_id"] == 5
+
+    def test_priority_options_come_from_redmine(self, client: TestClient):
+        response = client.get("/priority/options")
+
+        assert response.status_code == 200
+        assert response.json()[1] == {
+            "id": 2,
+            "label": "Normal",
+            "is_default": True,
+        }
+
 
 class TestListTickets:
     """テストケース: チケット一覧取得"""
@@ -127,6 +187,10 @@ class TestListTickets:
         assert [ticket["id"] for ticket in data["tickets"]] == [100, 101]
         assert data["tickets"][0]["assignee"] is None
         assert data["tickets"][1]["assignee"]["id"] == 7
+        assert data["tickets"][0]["latest_support_responder"] == {
+            "id": 7,
+            "name": "Test User",
+        }
         assert data["pagination"]["total_count"] == 2
 
         issues_request = next(
@@ -135,6 +199,19 @@ class TestListTickets:
             if call.request.url.path == "/issues.json"
         )
         assert issues_request.url.params["status_id"] == "open"
+
+    def test_responder_view_survives_one_detail_request_failure(
+        self, client: TestClient, mock_redmine_api: set[int]
+    ):
+        mock_redmine_api.add(101)
+
+        response = client.get("/tickets?view=responder")
+
+        assert response.status_code == 200
+        tickets = response.json()["tickets"]
+        assert [ticket["id"] for ticket in tickets] == [100, 101]
+        assert tickets[0]["latest_support_responder"] is not None
+        assert tickets[1]["latest_support_responder"] is None
 
     def test_sales_user_only_sees_authored_or_assigned_tickets(
         self, client: TestClient
@@ -307,6 +384,53 @@ class TestCustomFields:
         )
         assert response.status_code == 403
 
+    def test_sales_new_requirement_raises_existing_ticket_priority(self, client: TestClient):
+        store = app.dependency_overrides[get_session_store]()
+        store.sessions["test-session"] = replace(
+            store.sessions["test-session"], redmine_user_id=8
+        )
+
+        response = client.patch(
+            "/tickets/100/custom-fields",
+            json={"customer_visit_required": True},
+        )
+
+        assert response.status_code == 200
+        update_request = next(
+            call.request for call in reversed(respx.calls)
+            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
+        )
+        assert json.loads(update_request.content) == {"issue": {
+            "custom_fields": [{"id": 14, "value": "1"}],
+            "priority_id": 4,
+        }}
+
+    def test_support_new_requirement_raises_existing_ticket_priority(self, client: TestClient):
+        response = client.patch(
+            "/tickets/100/custom-fields",
+            json={"customer_visit_required": True},
+        )
+
+        assert response.status_code == 200
+        update_request = next(
+            call.request for call in reversed(respx.calls)
+            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
+        )
+        assert json.loads(update_request.content)["issue"]["priority_id"] == 4
+
+    def test_existing_requirement_does_not_raise_priority_again(self, client: TestClient):
+        response = client.patch(
+            "/tickets/100/custom-fields",
+            json={"report_required": True},
+        )
+
+        assert response.status_code == 200
+        update_request = next(
+            call.request for call in reversed(respx.calls)
+            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
+        )
+        assert "priority_id" not in json.loads(update_request.content)["issue"]
+
 class TestAnswerTicket:
     def test_support_user_adds_answer_and_assigns_ticket_author(
         self, client: TestClient
@@ -419,3 +543,20 @@ class TestUpdateStatus:
         """異常系: status_id が省略されていると422エラー"""
         resp = client.patch("/tickets/100/status", json={})
         assert resp.status_code == 422
+
+
+class TestUpdatePriority:
+    def test_update_priority_by_redmine_id(self, client: TestClient):
+        response = client.patch("/tickets/100/priority", json={"priority_id": 4})
+
+        assert response.status_code == 200
+        update_request = next(
+            call.request for call in reversed(respx.calls)
+            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
+        )
+        assert json.loads(update_request.content) == {"issue": {"priority_id": 4}}
+
+    def test_update_priority_rejects_unknown_id(self, client: TestClient):
+        response = client.patch("/tickets/100/priority", json={"priority_id": 999})
+
+        assert response.status_code == 400

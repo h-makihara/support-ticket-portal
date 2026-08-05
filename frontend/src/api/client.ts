@@ -52,7 +52,12 @@ export interface Ticket {
   description: string
   status: string
   priority: number
+  priority_name: string
   assignee: {
+    id: number
+    name: string
+  } | null
+  latest_support_responder?: {
     id: number
     name: string
   } | null
@@ -145,6 +150,13 @@ export async function updateStatus(ticketId: number, statusId: number): Promise<
   })
 }
 
+export async function updatePriority(ticketId: number, priorityId: number): Promise<void> {
+  await request(`/tickets/${ticketId}/priority`, {
+    method: 'PATCH',
+    body: JSON.stringify({ priority_id: priorityId }),
+  })
+}
+
 export async function claimTicket(ticketId: number): Promise<void> {
   await request(`/tickets/${ticketId}/assignee`, {
     method: 'PATCH',
@@ -158,6 +170,16 @@ export interface TicketStatusOption {
 
 export async function getTicketStatusOptions(): Promise<TicketStatusOption[]> {
   return request<TicketStatusOption[]>('/status/options')
+}
+
+export interface TicketPriorityOption {
+  id: number
+  label: string
+  is_default: boolean
+}
+
+export async function getTicketPriorityOptions(): Promise<TicketPriorityOption[]> {
+  return request<TicketPriorityOption[]>('/priority/options')
 }
 
 // ── Audit Log Types ────────────────────────────────────────────────

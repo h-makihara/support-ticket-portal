@@ -100,7 +100,7 @@ MOCK_TICKET_DETAIL: Dict[str, Any] = {
             {
                 "id": 1,
                 "notes": "初期コメントです",
-                "user": {"name": "admin"},
+                "user": {"id": 7, "name": "Test User"},
                 "created_on": "2024-01-01T00:05:00Z",
                 "details": [
                     {
@@ -113,7 +113,7 @@ MOCK_TICKET_DETAIL: Dict[str, Any] = {
             {
                 "id": 2,
                 "notes": "追加の質問です",
-                "user": {"name": "sales_user"},
+                "user": {"id": 8, "name": "Sales User"},
                 "created_on": "2024-01-02T10:00:00Z",
                 "details": [
                     {
@@ -126,7 +126,7 @@ MOCK_TICKET_DETAIL: Dict[str, Any] = {
             {
                 "id": 3,
                 "notes": "",
-                "user": {"name": "support_user"},
+                "user": {"id": 7, "name": "Test User"},
                 "created_on": "2024-01-02T11:00:00Z",
                 "details": [
                     {"property": "cf", "name": "12", "old_value": "0", "new_value": "1"},
@@ -170,9 +170,20 @@ def mock_redmine_api():
     """Mock all Redmine REST API endpoints with respx."""
     with respx.mock:
         current_ticket_detail = deepcopy(MOCK_TICKET_DETAIL)
+        detail_failures: set[int] = set()
         # Mock /issue_statuses.json
         respx.get("http://test-redmine:3000/issue_statuses.json").mock(
             return_value=httpx.Response(200, json={"issue_statuses": MOCK_STATUSES})
+        )
+
+        respx.get("http://test-redmine:3000/enumerations/issue_priorities.json").mock(
+            return_value=httpx.Response(200, json={"issue_priorities": [
+                {"id": 1, "name": "Low", "is_default": False},
+                {"id": 2, "name": "Normal", "is_default": True},
+                {"id": 3, "name": "High", "is_default": False},
+                {"id": 4, "name": "Urgent", "is_default": False},
+                {"id": 5, "name": "Immediate", "is_default": False},
+            ]})
         )
 
         respx.get("http://test-redmine:3000/custom_fields.json").mock(
@@ -249,10 +260,14 @@ def mock_redmine_api():
         respx.get("http://test-redmine:3000/issues.json").mock(side_effect=list_handler)
 
         # Mock GET /issues/{id}.json (ticket detail)
+        def detail_handler(request: httpx.Request):
+            ticket_id = int(request.url.path.split("/")[-1].removesuffix(".json"))
+            if ticket_id in detail_failures:
+                raise httpx.ConnectError("detail unavailable", request=request)
+            return httpx.Response(200, json=current_ticket_detail)
+
         respx.get(url__regex=r"http://test-redmine:3000/issues/\d+\.json").mock(
-            side_effect=lambda request: httpx.Response(
-                200, json=current_ticket_detail
-            )
+            side_effect=detail_handler
         )
 
         # Mock PUT /issues/{id}.json (update ticket - for comments and status changes)
@@ -272,6 +287,19 @@ def mock_redmine_api():
                     if assigned_to_id not in (None, "")
                     else None
                 )
+            if "priority_id" in payload:
+                priority_id = int(payload["priority_id"])
+                priority = next(
+                    p for p in [
+                        {"id": 1, "name": "Low"},
+                        {"id": 2, "name": "Normal"},
+                        {"id": 3, "name": "High"},
+                        {"id": 4, "name": "Urgent"},
+                        {"id": 5, "name": "Immediate"},
+                    ]
+                    if p["id"] == priority_id
+                )
+                current_ticket_detail["issue"]["priority"] = priority
             return httpx.Response(
                 200, json={"issue": current_ticket_detail["issue"]}
             )
@@ -280,7 +308,7 @@ def mock_redmine_api():
             side_effect=update_handler
         )
 
-        yield
+        yield detail_failures
 
 
 @pytest.fixture

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -120,6 +121,10 @@ CUSTOM_FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "customer_visit_required": {"name": "客先同行要否", "label": "客先同行が必要", "boolean": True, "support_only": False},
     "schedule_assigned": {"name": "予定・担当者アサイン済み", "label": "予定・担当者をアサインした", "boolean": True, "support_only": True},
 }
+
+PRIORITY_ESCALATION_FIELDS = frozenset(
+    {"report_required", "customer_visit_required"}
+)
 
 # Mapping: English filter key (used by frontend) → set of Redmine slug/name matches.
 # This is filled dynamically at startup by querying /issue_statuses.json.
@@ -262,6 +267,7 @@ def _issue_to_dict(i: Dict[str, Any], include_support_only: bool = True) -> Dict
         "description": i.get("description", ""),
         "status": i["status"]["name"],
         "priority": int(i["priority"]["id"]),
+        "priority_name": i["priority"].get("name", ""),
         "assignee": (
             {
                 "id": int(assigned_to["id"]),
@@ -275,6 +281,62 @@ def _issue_to_dict(i: Dict[str, Any], include_support_only: bool = True) -> Dict
     }
     result.update(_issue_custom_fields(i, include_support_only))
     return result
+
+
+def _latest_support_responder(
+    issue: Dict[str, Any], support_user_ids: set[int]
+) -> Optional[Dict[str, Any]]:
+    """Return the support user who most recently acted in the issue journal."""
+    support_journals = []
+    for journal in issue.get("journals", []):
+        user = journal.get("user")
+        if not isinstance(user, dict) or "id" not in user:
+            continue
+        try:
+            user_id = int(user["id"])
+        except (TypeError, ValueError):
+            continue
+        if user_id in support_user_ids:
+            support_journals.append((journal.get("created_on", ""), user_id, user))
+
+    if not support_journals:
+        return None
+    _, user_id, user = max(support_journals, key=lambda entry: entry[0])
+    return {"id": user_id, "name": user.get("name", "")}
+
+
+def _next_priority_id(
+    current_priority_id: int, priorities: List[Dict[str, Any]]
+) -> int:
+    """Return the next Redmine priority by enumeration order, capped at the top."""
+    ids = [int(priority["id"]) for priority in priorities]
+    try:
+        current_index = ids.index(int(current_priority_id))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="現在の優先度設定を解決できません") from None
+    return ids[min(current_index + 1, len(ids) - 1)]
+
+
+async def _issue_priorities(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
+    response = await client.get("/enumerations/issue_priorities.json")
+    if response.status_code != 200:
+        raise HTTPException(status_code=503, detail="優先度設定を取得できません")
+    priorities = response.json().get("issue_priorities", [])
+    if not priorities:
+        raise HTTPException(status_code=503, detail="優先度設定がありません")
+    try:
+        return [
+            {
+                **priority,
+                "id": int(priority["id"]),
+                "name": str(priority.get("name", "")),
+            }
+            for priority in priorities
+        ]
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=503, detail="優先度設定の形式が不正です"
+        ) from None
 
 
 def _journals_to_notes(journals: List[Dict[str, Any]]) -> List[Dict[str, str]]:
@@ -678,6 +740,20 @@ class LoginRequest(BaseModel):
     password: str
 
 
+@app.get("/priority/options")
+async def priority_options(session: SessionData = Depends(require_session)):
+    async with _client(session.redmine_api_key) as client:
+        priorities = await _issue_priorities(client)
+    return [
+        {
+            "id": int(priority["id"]),
+            "label": priority.get("name", ""),
+            "is_default": bool(priority.get("is_default", False)),
+        }
+        for priority in priorities
+    ]
+
+
 @app.post("/auth/login")
 async def login(
     credentials: LoginRequest,
@@ -777,6 +853,15 @@ async def create_ticket(
         if priority is not None:
             payload["issue"]["priority_id"] = priority
         async with _client(session.redmine_api_key) as c:
+            if (
+                priority is not None
+                and any(
+                    getattr(ticket_data, field) for field in PRIORITY_ESCALATION_FIELDS
+                )
+            ):
+                payload["issue"]["priority_id"] = _next_priority_id(
+                    priority, await _issue_priorities(c)
+                )
             r = await c.post("/issues.json", json=payload)
             span.set_attribute("redmine.status", r.status_code)
             if r.status_code != 201:
@@ -875,6 +960,26 @@ async def list_tickets(
                 ]
                 total_count = len(issues)
                 issues = issues[offset : offset + limit]
+                detail_responses = await asyncio.gather(
+                    *(
+                        c.get(
+                            f"/issues/{issue['id']}.json",
+                            params={"include": "journals"},
+                        )
+                        for issue in issues
+                    ),
+                    return_exceptions=True,
+                )
+                latest_responders: Dict[int, Optional[Dict[str, Any]]] = {}
+                for issue, detail_response in zip(issues, detail_responses):
+                    latest_responders[int(issue["id"])] = (
+                        _latest_support_responder(
+                            detail_response.json().get("issue", {}), support_ids
+                        )
+                        if isinstance(detail_response, httpx.Response)
+                        and detail_response.status_code == 200
+                        else None
+                    )
             elif is_sales and not is_support:
                 issues = [
                     issue
@@ -892,6 +997,9 @@ async def list_tickets(
                 issues = issues[:limit]
                 total_count = r.json().get("total_count", len(issues))
             result = [_issue_to_dict(i, include_support_only=is_support) for i in issues]
+            if responder_view:
+                for ticket in result:
+                    ticket["latest_support_responder"] = latest_responders.get(ticket["id"])
             span.set_attribute("result.count", len(result))
 
             return {
@@ -960,6 +1068,24 @@ async def update_custom_fields(
     field_ids = await _custom_field_ids()
     payload = {"issue": {"custom_fields": _custom_fields_payload(values, field_ids)}}
     async with _client(session.redmine_api_key) as client:
+        if any(values.get(key) is True for key in PRIORITY_ESCALATION_FIELDS):
+            current_response = await client.get(f"/issues/{ticket_id}.json")
+            if current_response.status_code != 200:
+                return JSONResponse(
+                    status_code=current_response.status_code,
+                    content={"detail": current_response.text},
+                )
+            current_issue = current_response.json()["issue"]
+            current_fields = _issue_custom_fields(current_issue, include_support_only=False)
+            newly_checked = any(
+                values.get(key) is True and not current_fields.get(key, False)
+                for key in PRIORITY_ESCALATION_FIELDS
+            )
+            if newly_checked:
+                current_priority = int(current_issue["priority"]["id"])
+                payload["issue"]["priority_id"] = _next_priority_id(
+                    current_priority, await _issue_priorities(client)
+                )
         response = await client.put(f"/issues/{ticket_id}.json", json=payload)
     if response.status_code not in (200, 204):
         return JSONResponse(status_code=response.status_code, content={"detail": response.text})
@@ -1047,6 +1173,10 @@ async def answer_ticket(
 
 class UpdateStatusRequest(BaseModel):
     status_id: int
+
+
+class UpdatePriorityRequest(BaseModel):
+    priority_id: int
 
 
 @app.patch("/tickets/{ticket_id}/assignee")
@@ -1173,6 +1303,43 @@ async def update_status(
                     content={"detail": "担当者の解除を反映できませんでした"},
                 )
             return {"detail": "Status updated"}
+
+
+@app.patch("/tickets/{ticket_id}/priority")
+async def update_priority(
+    ticket_id: int,
+    priority_data: UpdatePriorityRequest,
+    session: SessionData = Depends(require_session),
+):
+    async with _client(session.redmine_api_key) as client:
+        priorities = await _issue_priorities(client)
+        valid_ids = {int(priority["id"]) for priority in priorities}
+        priority_id = int(priority_data.priority_id)
+        if priority_id not in valid_ids:
+            raise HTTPException(status_code=400, detail="無効な優先度です")
+
+        response = await client.put(
+            f"/issues/{ticket_id}.json",
+            json={"issue": {"priority_id": priority_id}},
+        )
+        if response.status_code not in (200, 204):
+            return JSONResponse(
+                status_code=response.status_code,
+                content={"detail": response.text},
+            )
+        refreshed = await client.get(f"/issues/{ticket_id}.json")
+        if refreshed.status_code != 200:
+            return JSONResponse(
+                status_code=refreshed.status_code,
+                content={"detail": refreshed.text},
+            )
+        actual_priority_id = int(refreshed.json()["issue"]["priority"]["id"])
+        if actual_priority_id != priority_id:
+            return JSONResponse(
+                status_code=409,
+                content={"detail": "優先度を反映できませんでした"},
+            )
+    return {"detail": "Priority updated"}
 
 
 @app.get("/status/options")

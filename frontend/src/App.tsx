@@ -34,7 +34,7 @@ function App() {
         <Routes>
           <Route path="/" element={
             <RequireCapability user={user} capability="tickets:list">
-              <TicketList />
+              <TicketList user={user} />
             </RequireCapability>
           } />
           <Route path="/create" element={

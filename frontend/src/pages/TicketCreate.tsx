@@ -1,20 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { AuthUser, createTicket } from '../api/client'
-
-const PRIORITY_OPTIONS = [
-  { id: 1, label: '低' },
-  { id: 2, label: '通常' },
-  { id: 3, label: '高' },
-  { id: 4, label: '緊急' },
-  { id: 5, label: '最優先' },
-]
+import { AuthUser, createTicket, getTicketPriorityOptions, TicketPriorityOption } from '../api/client'
+import { normalizePriorityName } from '../priority'
 
 export function TicketCreate({ user }: { user: AuthUser }) {
   const navigate = useNavigate()
   const [subject, setSubject] = useState('')
   const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState(2)
+  const [priority, setPriority] = useState<number | null>(null)
+  const [priorityOptions, setPriorityOptions] = useState<TicketPriorityOption[]>([])
   const [customerId, setCustomerId] = useState('')
   const [reportRequired, setReportRequired] = useState(false)
   const [reportDelivered, setReportDelivered] = useState(false)
@@ -23,10 +17,19 @@ export function TicketCreate({ user }: { user: AuthUser }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  useEffect(() => {
+    getTicketPriorityOptions()
+      .then(options => {
+        setPriorityOptions(options)
+        setPriority(options.find(option => option.is_default)?.id ?? options[0]?.id ?? null)
+      })
+      .catch(e => setError(e instanceof Error ? e.message : '優先度設定の取得に失敗しました'))
+  }, [])
+
   const handleSubmit = async (e: Event) => {
     e.preventDefault()
-    if (!subject.trim() || !description.trim()) {
-      setError('件名と本文は必須です')
+    if (!subject.trim() || !description.trim() || priority === null) {
+      setError(priority === null ? '優先度を選択してください' : '件名と本文は必須です')
       return
     }
     setLoading(true)
@@ -91,12 +94,12 @@ export function TicketCreate({ user }: { user: AuthUser }) {
           <div className="form-group">
             <label>優先度</label>
             <select
-              value={priority}
+              value={priority ?? ''}
               onChange={e => setPriority(parseInt(e.target.value))}
               disabled={loading}
             >
-              {PRIORITY_OPTIONS.map(opt => (
-                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              {priorityOptions.map(opt => (
+                <option key={opt.id} value={opt.id}>{normalizePriorityName(opt.label)}</option>
               ))}
             </select>
           </div>
@@ -115,7 +118,13 @@ export function TicketCreate({ user }: { user: AuthUser }) {
             </>}
           </div>
 
-          <button className="btn btn-primary" type="submit" disabled={loading || !subject.trim() || !description.trim()}>
+          {(reportRequired || customerVisitRequired) && (
+            <p className="priority-notice" role="status">
+              対応条件が選択されているため、保存時に優先度が1段階上がります。
+            </p>
+          )}
+
+          <button className="btn btn-primary" type="submit" disabled={loading || priority === null || !subject.trim() || !description.trim()}>
             {loading ? '作成中...' : '作成する'}
           </button>
         </form>
