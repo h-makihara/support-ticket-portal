@@ -3,7 +3,7 @@
 import pytest
 from fastapi import HTTPException
 
-from src.backend.app import (
+from backend.app import (
     _journals_to_notes,
     _journals_to_audit,
     _issue_to_dict,
@@ -157,11 +157,37 @@ class TestJournalsToAudit:
         ]
         entries = _journals_to_audit(
             journals,
-            status_names={2: "対応中", 3: "回答済"},
+            status_names={2: "対応中", 3: "対応済"},
         )
         change = entries[0]["changes"][0]
         assert change["old_value"] == "対応中"
-        assert change["new_value"] == "回答済"
+        assert change["new_value"] == "対応済"
+
+    def test_priority_ids_are_converted_to_priority_names(self):
+        journals = [
+            {
+                "notes": "",
+                "user": {"name": "support_user"},
+                "created_on": "2024-01-01T00:00:00Z",
+                "details": [
+                    {
+                        "prop_key": "priority_id",
+                        "old_value": "2",
+                        "new_value": "4",
+                    }
+                ],
+            }
+        ]
+
+        entries = _journals_to_audit(
+            journals,
+            priority_names={2: "標準", 4: "緊急"},
+        )
+
+        change = entries[0]["changes"][0]
+        assert change["display_field"] == "優先度"
+        assert change["old_value"] == "標準"
+        assert change["new_value"] == "緊急"
 
     def test_custom_field_ids_and_boolean_values_are_displayed_as_ui_text(self):
         journals = [{

@@ -20,7 +20,7 @@
 
 ### 新機能
 
-#### Backend: 監査ログ API (`src/backend/app.py`)
+#### Backend: 監査ログ API (`backend/app.py`)
 
 チケット詳細の `audit_log` フィールドに、以下の情報が含まれる：
 
@@ -86,7 +86,7 @@ _FIELD_NAME_MAP = {
 
 ### 新機能
 
-#### Backend: ページネーション対応 (`src/backend/app.py`)
+#### Backend: ページネーション対応 (`backend/app.py`)
 
 `GET /tickets` に `limit`/`offset` パラメータを追加：
 

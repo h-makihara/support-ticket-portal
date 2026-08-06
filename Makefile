@@ -15,7 +15,7 @@ test:
 	uv run pytest tests/ --tb=short
 
 run:
-	uv run uvicorn src.backend.app:app --reload --host 0.0.0.0 --port 8000
+	uv run uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
 
 clean:
 	rm -rf .venv __pycache__ .pytest_cache .coverage htmlcov/

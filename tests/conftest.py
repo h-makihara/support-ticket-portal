@@ -20,8 +20,8 @@ os.environ.setdefault("REDMINE_PROJECT_ID", "99")
 os.environ.setdefault("REDMINE_TRACKER_ID", "4")
 
 # Import after env vars are set.
-from src.backend.app import app, get_session_store, _status_by_id, _status_by_key, _status_by_name
-from src.backend.auth import SessionData
+from backend.app import app, get_session_store, _status_by_id, _status_by_key, _status_by_name
+from backend.auth import SessionData
 
 
 class FakeSessionStore:
@@ -52,10 +52,9 @@ class FakeSessionStore:
 # ── Mock Redmine API responses ────────────────────────────────────
 
 MOCK_STATUSES: List[Dict[str, Any]] = [
-    {"id": 1, "name": "新規", "slug": "new"},
+    {"id": 1, "name": "対応待ち", "slug": "new"},
     {"id": 2, "name": "対応中", "slug": "in_progress"},
-    {"id": 3, "name": "回答済", "slug": "resolved"},
-    {"id": 4, "name": "追加質問", "slug": "feedback"},
+    {"id": 3, "name": "対応済", "slug": "resolved"},
     {"id": 5, "name": "クローズ", "slug": "closed"},
     {"id": 6, "name": "クローズ待ち", "slug": "rejected"},
 ]
@@ -71,7 +70,7 @@ MOCK_TICKET_CREATED: Dict[str, Any] = {
         "id": 100,
         "subject": "テスト件名",
         "description": "テスト本文",
-        "status": {"id": 1, "name": "新規"},
+        "status": {"id": 1, "name": "対応待ち"},
         "priority": {"id": 3, "name": "Normal"},
         "created_on": "2024-01-01T00:00:00Z",
         "updated_on": "2024-01-01T00:00:00Z",
@@ -105,7 +104,7 @@ MOCK_TICKET_DETAIL: Dict[str, Any] = {
                 "details": [
                     {
                         "prop_key": "status_id",
-                        "old_value": "新規",
+                        "old_value": "対応待ち",
                         "new_value": "対応中",
                     }
                 ],
@@ -120,7 +119,12 @@ MOCK_TICKET_DETAIL: Dict[str, Any] = {
                         "prop_key": "assigned_to_id",
                         "old_value": None,
                         "new_value": "7",
-                    }
+                    },
+                    {
+                        "prop_key": "priority_id",
+                        "old_value": "2",
+                        "new_value": "4",
+                    },
                 ],
             },
             {
@@ -144,7 +148,7 @@ MOCK_TICKET_LIST: Dict[str, Any] = {
             "subject": "チケットA",
             "description": "説明A",
             "author": {"id": 8, "name": "Sales User"},
-            "status": {"id": 1, "name": "新規"},
+            "status": {"id": 1, "name": "対応待ち"},
             "priority": {"id": 2, "name": "High"},
             "created_on": "2024-01-01T00:00:00Z",
             "updated_on": "2024-01-01T00:00:00Z",

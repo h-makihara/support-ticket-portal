@@ -4,12 +4,13 @@ import importlib
 import json
 from dataclasses import replace
 
+import pytest
 import respx
 from fastapi.testclient import TestClient
 
-from src.backend.app import app, get_session_store
+from backend.app import app, get_session_store
 
-app_module = importlib.import_module("src.backend.app")
+app_module = importlib.import_module("backend.app")
 
 
 class TestCreateTicket:
@@ -154,6 +155,11 @@ class TestListTickets:
         assert "pagination" in data
         assert len(data["tickets"]) == 2
         assert data["pagination"]["total_count"] == 2
+        issues_request = next(
+            call.request for call in respx.calls
+            if call.request.url.path == "/issues.json"
+        )
+        assert issues_request.url.params["status_id"] == "*"
 
     def test_uses_authenticated_users_api_key(self, client: TestClient, mock_redmine_api):
         resp = client.get("/tickets")
@@ -167,7 +173,7 @@ class TestListTickets:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["tickets"]) == 1
-        assert data["tickets"][0]["status"] == "新規"
+        assert data["tickets"][0]["status"] == "対応待ち"
 
     def test_list_tickets_pagination(self, client: TestClient):
         """正常系: pagination メタ情報が正しく返る"""
@@ -313,6 +319,26 @@ class TestGetTicket:
             }
         ]
 
+    def test_get_ticket_resolves_priority_names_in_audit_log(
+        self, client: TestClient
+    ):
+        resp = client.get("/tickets/100")
+        assert resp.status_code == 200
+        priority_changes = [
+            change
+            for entry in resp.json()["audit_log"]
+            for change in entry["changes"]
+            if change["field"] == "priority_id"
+        ]
+        assert priority_changes == [
+            {
+                "field": "priority_id",
+                "display_field": "優先度",
+                "old_value": "Normal",
+                "new_value": "Urgent",
+            }
+        ]
+
 
 class TestAddComment:
     """テストケース: コメント追加"""
@@ -361,7 +387,47 @@ class TestCustomFields:
         assert json.loads(update_request.content) == {"issue": {"custom_fields": [
             {"id": 11, "value": "C-200"},
             {"id": 13, "value": "1"},
-        ]}}
+        ], "status_id": 3, "assigned_to_id": 8}}
+
+    @pytest.mark.parametrize("field_name, field_id", [
+        ("report_delivered", 13),
+        ("schedule_assigned", 15),
+    ])
+    def test_completion_field_assigns_ticket_author(
+        self, client: TestClient, field_name: str, field_id: int
+    ):
+        response = client.patch(
+            "/tickets/100/custom-fields",
+            json={field_name: True},
+        )
+
+        assert response.status_code == 200
+        update_request = next(
+            call.request for call in reversed(respx.calls)
+            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
+        )
+        assert json.loads(update_request.content) == {"issue": {
+            "custom_fields": [{"id": field_id, "value": "1"}],
+            "status_id": 3,
+            "assigned_to_id": 8,
+        }}
+
+    def test_completion_field_takes_precedence_over_requirement_field(
+        self, client: TestClient
+    ):
+        response = client.patch(
+            "/tickets/100/custom-fields",
+            json={"report_required": True, "report_delivered": True},
+        )
+
+        assert response.status_code == 200
+        update_request = next(
+            call.request for call in reversed(respx.calls)
+            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
+        )
+        updated_issue = json.loads(update_request.content)["issue"]
+        assert updated_issue["status_id"] == 3
+        assert updated_issue["assigned_to_id"] == 8
 
     def test_sales_cannot_see_or_update_support_only_fields(self, client: TestClient):
         store = app.dependency_overrides[get_session_store]()
@@ -402,6 +468,8 @@ class TestCustomFields:
         )
         assert json.loads(update_request.content) == {"issue": {
             "custom_fields": [{"id": 14, "value": "1"}],
+            "status_id": 1,
+            "assigned_to_id": "",
             "priority_id": 4,
         }}
 
@@ -417,6 +485,8 @@ class TestCustomFields:
             if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
         )
         assert json.loads(update_request.content)["issue"]["priority_id"] == 4
+        assert json.loads(update_request.content)["issue"]["status_id"] == 1
+        assert json.loads(update_request.content)["issue"]["assigned_to_id"] == ""
 
     def test_existing_requirement_does_not_raise_priority_again(self, client: TestClient):
         response = client.patch(
@@ -429,7 +499,10 @@ class TestCustomFields:
             call.request for call in reversed(respx.calls)
             if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
         )
-        assert "priority_id" not in json.loads(update_request.content)["issue"]
+        updated_issue = json.loads(update_request.content)["issue"]
+        assert "priority_id" not in updated_issue
+        assert updated_issue["status_id"] == 1
+        assert updated_issue["assigned_to_id"] == ""
 
 class TestAnswerTicket:
     def test_support_user_adds_answer_and_assigns_ticket_author(
@@ -479,7 +552,7 @@ class TestAnswerTicket:
         resp = client.post("/tickets/100/answer", json={"body": "回答です"})
 
         assert resp.status_code == 503
-        assert resp.json()["detail"] == "回答済ステータスが設定されていません"
+        assert resp.json()["detail"] == "対応済ステータスが設定されていません"
 
 
 class TestClaimTicket:
@@ -520,8 +593,8 @@ class TestUpdateStatus:
         resp = client.patch("/tickets/100/status", json={"status_id": 2})
         assert resp.status_code == 200
 
-    def test_additional_question_clears_assignee(self, client: TestClient):
-        resp = client.patch("/tickets/100/status", json={"status_id": 4})
+    def test_return_to_waiting_clears_assignee(self, client: TestClient):
+        resp = client.patch("/tickets/100/status", json={"status_id": 1})
         assert resp.status_code == 200
         update_request = next(
             call.request
@@ -531,7 +604,7 @@ class TestUpdateStatus:
         )
         assert (
             update_request.content
-            == b'{"issue":{"status_id":4,"assigned_to_id":""}}'
+            == b'{"issue":{"status_id":1,"assigned_to_id":""}}'
         )
 
     def test_update_status_invalid(self, client: TestClient):

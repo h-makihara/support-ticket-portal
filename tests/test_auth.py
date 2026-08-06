@@ -6,7 +6,7 @@ import httpx
 import respx
 from fastapi.testclient import TestClient
 
-from src.backend.app import app, get_session_store
+from backend.app import app, get_session_store
 from tests.conftest import FakeSessionStore
 
 

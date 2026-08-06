@@ -21,7 +21,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
-from src.backend.auth import SessionData, SessionStore, authenticate_with_redmine
+from backend.auth import SessionData, SessionStore, authenticate_with_redmine
 
 logger = logging.getLogger(__name__)
 
@@ -125,22 +125,16 @@ CUSTOM_FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
 PRIORITY_ESCALATION_FIELDS = frozenset(
     {"report_required", "customer_visit_required"}
 )
+AUTHOR_REASSIGNMENT_FIELDS = frozenset(
+    {"report_delivered", "schedule_assigned"}
+)
 
 # Mapping: English filter key (used by frontend) → set of Redmine slug/name matches.
 # This is filled dynamically at startup by querying /issue_statuses.json.
 _ENGLISH_KEY_MATCHERS: Dict[str, set] = {
-    "open":        {"new", "open", "新規"},
+    "open":        {"new", "open", "新規", "対応待ち"},
     "in_progress": {"in_progress", "in progress", "progress", "進行中", "対応中"},
-    "answered": {"resolved", "answered", "回答済"},
-    "additional_question": {
-        "reopened",
-        "re-opened",
-        "re_opened",
-        "feedback",
-        "additional_question",
-        "フィードバック",
-        "追加質問",
-    },
+    "answered": {"resolved", "answered", "回答済", "対応済"},
     "pending_close": {"rejected", "pending_close", "クローズ待ち"},
     "closed":      {"closed", "終了", "クローズ"},
 }
@@ -150,7 +144,6 @@ _DEFAULT_KEY_FALLBACK: Dict[str, int] = {
     "open":        1,   # New
     "in_progress": 2,   # In Progress
     "answered":    3,   # Resolved
-    "additional_question": 4,  # Feedback
     "pending_close": 6,  # Rejected
     "closed":      5,   # Closed
 }
@@ -388,6 +381,7 @@ def _journals_to_audit(
     user_names: Optional[Dict[int, str]] = None,
     status_names: Optional[Dict[int, str]] = None,
     custom_fields: Optional[Dict[int, Dict[str, Any]]] = None,
+    priority_names: Optional[Dict[int, str]] = None,
 ) -> List[Dict[str, Any]]:
     """Convert Redmine journals to audit log entries.
 
@@ -402,6 +396,7 @@ def _journals_to_audit(
     user_names = user_names or {}
     status_names = status_names or {}
     custom_fields = custom_fields or {}
+    priority_names = priority_names or {}
 
     def custom_field_definition(detail: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if detail.get("property") != "cf":
@@ -428,6 +423,9 @@ def _journals_to_audit(
         elif field in ("status", "status_id"):
             old_value = _status_name_for_audit(old_value, status_names)
             new_value = _status_name_for_audit(new_value, status_names)
+        elif field in ("priority", "priority_id"):
+            old_value = _priority_name_for_audit(old_value, priority_names)
+            new_value = _priority_name_for_audit(new_value, priority_names)
         return {
             "field": field,
             "display_field": (
@@ -505,6 +503,19 @@ def _status_name_for_audit(
         return value
     try:
         return status_names.get(int(value), value)
+    except (TypeError, ValueError):
+        return value
+
+
+def _priority_name_for_audit(
+    value: Any,
+    priority_names: Dict[int, str],
+) -> Any:
+    """Replace a Redmine priority ID with its display name when available."""
+    if value in (None, ""):
+        return value
+    try:
+        return priority_names.get(int(value), value)
     except (TypeError, ValueError):
         return value
 
@@ -902,7 +913,13 @@ async def list_tickets(
         limit = max(1, min(limit, 1000))
         offset = max(0, offset)
 
-        params: Dict[str, Any] = {"project_id": REDMINE_PROJECT_ID}
+        # Redmine defaults an omitted status_id to open issues. Request every
+        # status explicitly so the portal's 「すべて」 cache also contains
+        # closed tickets for local filtering.
+        params: Dict[str, Any] = {
+            "project_id": REDMINE_PROJECT_ID,
+            "status_id": "*",
+        }
 
         # Translate frontend's English status key → Redmine status_id for filtering.
         if responder_view:
@@ -933,16 +950,13 @@ async def list_tickets(
             issues = r.json()["issues"]
             if responder_view:
                 responder_statuses = {
-                    "新規",
+                    "対応待ち",
                     "対応中",
-                    "追加質問",
                     "クローズ待ち",
                     # Backward compatibility while an existing environment is
                     # being migrated by the bootstrap.
                     "New",
                     "In Progress",
-                    "Feedback",
-                    "Reopened",
                     "Rejected",
                 }
                 try:
@@ -1035,12 +1049,25 @@ async def get_ticket(ticket_id: int, session: SessionData = Depends(require_sess
             assigned_to = i.get("assigned_to")
             if assigned_to:
                 user_names[int(assigned_to["id"])] = assigned_to.get("name", "")
+            try:
+                priority_names = {
+                    int(priority["id"]): priority["name"]
+                    for priority in await _issue_priorities(c)
+                }
+            except HTTPException:
+                priority = i.get("priority") or {}
+                priority_names = (
+                    {int(priority["id"]): priority.get("name", "")}
+                    if priority.get("id") is not None
+                    else {}
+                )
             # Full audit log with comments + field changes.
             data["audit_log"] = _journals_to_audit(
                 i.get("journals", []),
                 user_names,
                 _status_by_id,
                 _custom_field_audit_metadata(await _custom_field_ids(), is_support),
+                priority_names,
             )
             # Also provide backward-compatible notes list.
             data["notes"] = _journals_to_notes(i.get("journals", []))
@@ -1068,7 +1095,14 @@ async def update_custom_fields(
     field_ids = await _custom_field_ids()
     payload = {"issue": {"custom_fields": _custom_fields_payload(values, field_ids)}}
     async with _client(session.redmine_api_key) as client:
-        if any(values.get(key) is True for key in PRIORITY_ESCALATION_FIELDS):
+        escalates_priority = any(
+            values.get(key) is True for key in PRIORITY_ESCALATION_FIELDS
+        )
+        reassigns_to_author = any(
+            values.get(key) is True for key in AUTHOR_REASSIGNMENT_FIELDS
+        )
+        current_issue = None
+        if escalates_priority or reassigns_to_author:
             current_response = await client.get(f"/issues/{ticket_id}.json")
             if current_response.status_code != 200:
                 return JSONResponse(
@@ -1076,6 +1110,17 @@ async def update_custom_fields(
                     content={"detail": current_response.text},
                 )
             current_issue = current_response.json()["issue"]
+
+        if escalates_priority and current_issue is not None:
+            waiting_status_id = _resolve_status_id("open")
+            if waiting_status_id is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="対応待ちステータスが設定されていません",
+                )
+            payload["issue"]["status_id"] = waiting_status_id
+            payload["issue"]["assigned_to_id"] = ""
+
             current_fields = _issue_custom_fields(current_issue, include_support_only=False)
             newly_checked = any(
                 values.get(key) is True and not current_fields.get(key, False)
@@ -1086,6 +1131,23 @@ async def update_custom_fields(
                 payload["issue"]["priority_id"] = _next_priority_id(
                     current_priority, await _issue_priorities(client)
                 )
+
+        if reassigns_to_author and current_issue is not None:
+            author = current_issue.get("author")
+            if not author or author.get("id") is None:
+                return JSONResponse(
+                    status_code=409,
+                    content={"detail": "チケットの起票者を取得できませんでした"},
+                )
+            completed_status_id = _resolve_status_id("answered")
+            if completed_status_id is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="対応済ステータスが設定されていません",
+                )
+            payload["issue"]["status_id"] = completed_status_id
+            payload["issue"]["assigned_to_id"] = int(author["id"])
+
         response = await client.put(f"/issues/{ticket_id}.json", json=payload)
     if response.status_code not in (200, 204):
         return JSONResponse(status_code=response.status_code, content={"detail": response.text})
@@ -1134,7 +1196,7 @@ async def answer_ticket(
         if answered_status_id is None:
             raise HTTPException(
                 status_code=503,
-                detail="回答済ステータスが設定されていません",
+                detail="対応済ステータスが設定されていません",
             )
 
         async with _client(session.redmine_api_key) as client:
@@ -1268,10 +1330,10 @@ async def update_status(
 
         span.set_attribute("new.status_id", sid)
         payload = {"issue": {"status_id": sid}}
-        clears_assignee = _status_by_id.get(sid) == "追加質問"
+        clears_assignee = sid == _resolve_status_id("open")
         if clears_assignee:
-            # A follow-up question returns the ticket to the shared support
-            # queue so another support user can claim it.
+            # A follow-up question returns the ticket to 対応待ち and the
+            # shared support queue so another support user can claim it.
             # Redmine ignores JSON null for this field; an empty string is its
             # REST representation for "unassigned".
             payload["issue"]["assigned_to_id"] = ""

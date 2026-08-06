@@ -73,10 +73,10 @@ steps:
       statuses: response.body.issue_statuses
       statusNames: ${vars.statuses.map(s => s.name)}
     assertions:
-      - vars.statusNames.includes("新規")
+      - vars.statusNames.includes("対応待ち")
       - vars.statusNames.includes("対応中")
-      - vars.statusNames.includes("回答済")
-      - vars.statusNames.includes("追加質問")
+      - vars.statusNames.includes("対応済")
+      - '!vars.statusNames.includes("追加質問")'
       - vars.statusNames.includes("クローズ待ち")
       - vars.statusNames.includes("クローズ")
 

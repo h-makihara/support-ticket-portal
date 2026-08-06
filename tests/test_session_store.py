@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from src.backend.auth import SESSION_TTL_SECONDS, SessionData, SessionStore
+from backend.auth import SESSION_TTL_SECONDS, SessionData, SessionStore
 
 
 class FakeRedis:

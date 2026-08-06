@@ -15,10 +15,9 @@ admin.update!(must_change_passwd: false)
 # Reuse Redmine's default status rows where possible so existing issues keep
 # their status IDs when this bootstrap is applied to an existing environment.
 status_definitions = [
-  ["新規",       ["New"],                    false],
+  ["対応待ち",   ["新規", "New"],            false],
   ["対応中",     ["In Progress"],            false],
-  ["回答済",     ["Resolved"],               false],
-  ["追加質問",   ["Feedback", "Reopened"],   false],
+  ["対応済",     ["回答済", "Resolved"],      false],
   ["クローズ待ち", ["Rejected"],              false],
   ["クローズ",   ["Closed"],                 true]
 ]
@@ -34,11 +33,28 @@ status_definitions.each_with_index do |(name, legacy_names, is_closed), index|
   statuses[name] = status
 end
 
+# 「追加質問」は「対応待ち」へ統合する。既存チケットを移行し、参照する
+# ワークフローを消してから旧ステータス自体を削除する。
+obsolete_statuses = IssueStatus.where(
+  name: ["追加質問", "Feedback", "Reopened"]
+).where.not(id: statuses.fetch("対応待ち").id)
+obsolete_statuses.each do |obsolete_status|
+  Issue.where(status_id: obsolete_status.id).update_all(
+    status_id: statuses.fetch("対応待ち").id
+  )
+  Tracker.where(default_status_id: obsolete_status.id).update_all(
+    default_status_id: statuses.fetch("対応待ち").id
+  )
+  WorkflowTransition.where(old_status_id: obsolete_status.id).delete_all
+  WorkflowTransition.where(new_status_id: obsolete_status.id).delete_all
+  obsolete_status.destroy!
+end
+
 # Trackers, roles and workflows are administration resources and cannot be
 # created through Redmine's REST API. Provision them from inside Redmine.
 tracker_name = ENV.fetch("REDMINE_TRACKER_NAME", "問い合わせ")
 tracker = Tracker.find_or_initialize_by(name: tracker_name)
-tracker.default_status = statuses.fetch("新規")
+tracker.default_status = statuses.fetch("対応待ち")
 tracker.save!
 
 role_permissions = {
@@ -91,19 +107,21 @@ custom_field_definitions.each do |name, format, default_value, support_only|
   custom_field.save!
 end
 
-# Most complex route:
-# 新規 → 対応中 → 回答済 → 追加質問 → 対応中 → 回答済
-#      → クローズ待ち → クローズ
+# 対応待ち → 対応中 → 対応済 → 対応待ち（再質問・追加質問）
+#                         └→ クローズ待ち → クローズ
 workflow_edges = [
-  [nil, "新規"],
-  ["新規", "対応中"],
-  ["対応中", "回答済"],
-  ["回答済", "追加質問"],
-  ["追加質問", "対応中"],
-  ["回答済", "クローズ待ち"],
+  [nil, "対応待ち"],
+  ["対応待ち", "対応中"],
+  ["対応待ち", "対応済"],
+  ["対応中", "対応待ち"],
+  ["対応中", "対応済"],
+  ["対応済", "対応待ち"],
+  ["対応済", "クローズ待ち"],
+  ["クローズ待ち", "対応待ち"],
+  ["クローズ待ち", "対応済"],
   ["クローズ待ち", "クローズ"]
 ]
-sales_destinations = ["回答済", "追加質問", "クローズ待ち"]
+sales_destinations = ["対応待ち", "クローズ待ち", "クローズ"]
 
 workflow_trackers = (project.trackers.to_a + [tracker]).uniq
 roles.each do |role_name, role|

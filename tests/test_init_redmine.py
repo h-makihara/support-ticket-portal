@@ -91,22 +91,20 @@ def test_statuses_support_redmine_61_defaults():
             "open": 1,
             "in_progress": 2,
             "answered": 3,
-            "additional_question": 4,
             "pending_close": 6,
             "closed": 5,
         }
 
 
-def test_statuses_keep_reopened_compatibility():
+def test_statuses_support_portal_workflow_names():
     def handler(request):
         return httpx.Response(
             200,
             json={
                 "issue_statuses": [
-                    {"id": 1, "name": "New"},
+                    {"id": 1, "name": "対応待ち"},
                     {"id": 2, "name": "In Progress"},
-                    {"id": 3, "name": "Resolved"},
-                    {"id": 4, "name": "Reopened"},
+                    {"id": 3, "name": "対応済"},
                     {"id": 5, "name": "Closed"},
                     {"id": 6, "name": "Rejected"},
                 ]
@@ -114,9 +112,6 @@ def test_statuses_keep_reopened_compatibility():
         )
 
     with client_for(handler) as client:
-        assert (
-            init_redmine.check_statuses(client, "api-key")[
-                "additional_question"
-            ]
-            == 4
-        )
+        mapping = init_redmine.check_statuses(client, "api-key")
+        assert mapping["open"] == 1
+        assert mapping["answered"] == 3

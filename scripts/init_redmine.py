@@ -4,7 +4,7 @@
 Redmine REST API を叩いて、以下のリソースを作成（既存ならスキップ）：
  - プロジェクト「社内問い合わせ」(internal-inquiry)
  - トラッカー「問い合わせ」
- - ステータス定義（新規・対応中・回答済・追加質問・クローズ待ち・クローズ）
+ - ステータス定義（対応待ち・対応中・対応済・クローズ待ち・クローズ）
  - ロール：営業担当者・サポート担当者
  - ロール別ワークフロー
 
@@ -38,20 +38,11 @@ PROJECT_NAME = "社内問い合わせ"
 TRACKER_NAME = "問い合わせ"
 
 # Redmine のステータス名 → ポータルが利用する英語キー。
-# Redmine 6.1 のデフォルトは New / In Progress / Resolved / Feedback /
-# Closed / Rejected。旧構成の Reopened と日本語表示も受け入れる。
+# Redmine 6.1 の既定ステータスをポータル用の日本語表示へ変換する。
 STATUS_KEY_ALIASES = {
-    "open": {"new", "open", "新規"},
+    "open": {"new", "open", "新規", "対応待ち"},
     "in_progress": {"in progress", "in_progress", "progress", "進行中", "対応中"},
-    "answered": {"resolved", "回答済"},
-    "additional_question": {
-        "feedback",
-        "reopened",
-        "re-opened",
-        "re_opened",
-        "フィードバック",
-        "追加質問",
-    },
+    "answered": {"resolved", "回答済", "対応済"},
     "pending_close": {"rejected", "クローズ待ち"},
     "closed": {"closed", "終了", "クローズ"},
 }
@@ -214,7 +205,6 @@ def check_statuses(client: httpx.Client, api_key: str) -> Dict[str, int]:
         "open",
         "in_progress",
         "answered",
-        "additional_question",
         "pending_close",
         "closed",
     }

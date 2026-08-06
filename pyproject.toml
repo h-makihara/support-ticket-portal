@@ -30,13 +30,13 @@ test = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = [
-    "--cov=src/backend",
+    "--cov=backend",
     "--cov-report=term-missing",
     "-v",
 ]
 
 [tool.coverage.run]
-source = ["src/backend"]
+source = ["backend"]
 omit = [
     "*/__pycache__/*",
 ]

@@ -81,9 +81,9 @@ h3 { font-size: 21px; font-weight: 600; margin-bottom: 20px; }
 .table tbody tr:hover { background: #fafafc; }
 .table td:nth-child(2) a { color: var(--ink); font-size: 15px; font-weight: 600; }
 .status-badge { display: inline-block; padding: 4px 10px; color: var(--ink); background: #f0f0f2; border-radius: 999px; font-size: 12px; white-space: nowrap; }
-.status-open, .status-新規 { color: #0058a8; background: #e8f3ff; }
+.status-open, .status-新規, .status-対応待ち { color: #0058a8; background: #e8f3ff; }
 .status-in-progress, .status-対応中 { color: #8a4b00; background: #fff3df; }
-.status-feedback, .status-回答済 { color: #126b3d; background: #e9f7ef; }
+.status-feedback, .status-回答済, .status-対応済 { color: #126b3d; background: #e9f7ef; }
 .status-closed, .status-クローズ { color: var(--muted); background: #eeeef0; }
 .priority-badge { display: inline-block; min-width: 48px; padding: 4px 10px; border: 1px solid transparent; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.35; text-align: center; white-space: nowrap; }
 .priority-level-1 { color: #5f6368; background: #f0f0f2; border-color: #dedee3; }

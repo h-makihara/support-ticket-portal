@@ -5,10 +5,9 @@ import { priorityBadgeClass, priorityLabel } from '../priority'
 
 const STATUS_OPTIONS = [
   { value: '', label: 'すべて', names: [] },
-  { value: 'open', label: '新規', names: ['新規', 'New'] },
+  { value: 'open', label: '対応待ち', names: ['対応待ち', '新規', 'New'] },
   { value: 'in_progress', label: '対応中', names: ['対応中', 'In Progress'] },
-  { value: 'answered', label: '回答済', names: ['回答済', 'Resolved'] },
-  { value: 'additional_question', label: '追加質問', names: ['追加質問', 'Feedback', 'Reopened'] },
+  { value: 'answered', label: '対応済', names: ['対応済', '回答済', 'Resolved'] },
   { value: 'pending_close', label: 'クローズ待ち', names: ['クローズ待ち', 'Rejected'] },
   { value: 'closed', label: 'クローズ', names: ['クローズ', 'Closed'] },
 ]
@@ -119,12 +118,13 @@ export function TicketList({ user }: { user: AuthUser }) {
       ) : (
         <>
           <table className="table">
-            <thead><tr><th>ID</th><th>件名</th><th>ステータス</th><th>優先度</th><th>作成日</th></tr></thead>
+            <thead><tr><th>ID</th><th>件名</th><th>顧客ID</th><th>ステータス</th><th>優先度</th><th>作成日</th></tr></thead>
             <tbody>
               {tickets.map(ticket => (
                 <tr key={ticket.id}>
                   <td>{ticket.id}</td>
                   <td><Link to={`/tickets/${ticket.id}`}>{ticket.subject}</Link></td>
+                  <td>{ticket.customer_id || '-'}</td>
                   <td><span className={`status-badge status-${ticket.status.toLowerCase().replace(/\s+/g, '_')}`}>{ticket.status}</span></td>
                   <td><span className={priorityBadgeClass(ticket)}>{priorityLabel(ticket)}</span></td>
                   <td>{ticket.created_on ? new Date(ticket.created_on).toLocaleDateString() : '-'}</td>

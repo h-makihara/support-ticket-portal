@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 from fastapi.testclient import TestClient
-from src.backend.app import (
+from backend.app import (
     REDMINE_BASE_URL,
     _fetch_statuses,
     _resolve_status_id,
@@ -39,7 +39,7 @@ class TestStatusResolution:
     """テストケース: ステータス解決ロジック"""
 
     def test_resolve_open_status(self, client: TestClient):
-        """正常系: open キーが New(ID=1) に解決される"""
+        """正常系: open キーが 対応待ち(ID=1) に解決される"""
         # Status cache should be populated by startup event.
         result = _resolve_status_id("open")
         assert result == 1
@@ -53,11 +53,6 @@ class TestStatusResolution:
         """正常系: closed キーが クローズ(ID=5) に解決される"""
         result = _resolve_status_id("closed")
         assert result == 5
-
-    def test_resolve_additional_question_status(self, client: TestClient):
-        """正常系: additional_question が 追加質問(ID=4) に解決される"""
-        result = _resolve_status_id("additional_question")
-        assert result == 4
 
     def test_resolve_unknown_status_returns_none(self, client: TestClient):
         """正常系: 未知のキーは None を返す"""

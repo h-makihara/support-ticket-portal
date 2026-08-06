@@ -47,7 +47,7 @@ docker compose up --build -d
 
 ```bash
 uv sync
-uv run uvicorn src.backend.app:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Frontend:
