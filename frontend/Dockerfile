@@ -1,6 +1,7 @@
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY package*.json ./
+COPY package*.json .npmrc ./
+RUN npm install --global npm@11.10.0
 RUN npm ci
 COPY . .
 RUN npm run build

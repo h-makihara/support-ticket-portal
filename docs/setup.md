@@ -4,7 +4,7 @@
 
 - Docker と Docker Compose v2
 - 初期化スクリプトを個別実行する場合は Python 3.12+
-- ローカル開発・テストを行う場合は uv、Node.js 20.19+、npm
+- ローカル開発・テストを行う場合は uv 0.11.17+、Node.js 20.19+、npm 11.10+
 - 結合テストを行う場合は runn
 
 ## Docker Compose で起動
