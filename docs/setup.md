@@ -71,6 +71,27 @@ cd frontend
 npm run build
 ```
 
+ブラウザーE2Eを初めて実行する場合は、ブラウザーをインストールします。
+
+```bash
+make e2e-install
+```
+
+E2Eでは `.env` の `TEST_SALES_USERNAME/PASSWORD` と `TEST_SUPPORT_USERNAME/PASSWORD` を読み込みます。`E2E_SALES_USERNAME/PASSWORD`、`E2E_SUPPORT_USERNAME/PASSWORD` を実行環境へ設定すると、その値を優先します。検証ユーザーを作成するには `ENABLE_TEST_USERS=true` で Redmine 初期化を実行してください。
+
+```bash
+# 機能観点ごとのE2E（フルシナリオを除く）
+make e2e-focused
+
+# 業務フロー全体のE2E
+make e2e-full
+
+# Backend、Frontend、ビルド、フルE2Eを一括実行
+make regression
+```
+
+詳細なテスト選択基準は [テストガイド](testing.md) を参照してください。
+
 Docker Compose 一式が起動済みの場合:
 
 ```bash

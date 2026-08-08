@@ -13,6 +13,7 @@
 
 ## テスト・その他
 
+- [テストガイド](testing.md) — 観点別E2Eとフルリグレッションの実行方法・適用基準
 - `tests/init_test.yaml` — Redmine 初期化の正しさを検証する runn テスト
 - [Changelog](changelog.md) — 変更履歴
 

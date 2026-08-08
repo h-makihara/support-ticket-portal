@@ -61,9 +61,15 @@ npm test
 
 # フロントエンド型チェックと本番ビルド
 npm run build
+
+# 観点別E2E（Docker Compose 一式の起動が必要）
+make e2e-focused
+
+# 大きな変更時のフルリグレッション
+make regression
 ```
 
-結合テストには [runn](https://github.com/k1LoW/runn) を利用します。Docker Compose 一式が起動した状態で `runn` を実行してください。
+ブラウザーE2Eには Playwright、API結合テストには [runn](https://github.com/k1LoW/runn) を利用します。準備、観点別コマンド、フルリグレッションの適用基準は [テストガイド](docs/testing.md) を参照してください。
 
 ## 設定
 
@@ -85,6 +91,7 @@ npm run build
 - [セットアップガイド](docs/setup.md)
 - [アーキテクチャ](docs/architecture.md)
 - [Redmine 設定とワークフロー](docs/redmine.md)
+- [テストガイド](docs/testing.md)
 - [MVP スコープ](docs/scope.md)
 - [変更履歴](docs/changelog.md)
 

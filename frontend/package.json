@@ -7,8 +7,14 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "vitest run",
-    "preview": "vite preview"
+    "test": "vitest run src",
+    "preview": "vite preview",
+    "e2e": "playwright test --grep-invert @full-regression",
+    "e2e:creation": "playwright test e2e/ticket-creation.spec.ts",
+    "e2e:support": "playwright test e2e/support-response.spec.ts",
+    "e2e:requirements": "playwright test e2e/requirements.spec.ts",
+    "e2e:closure": "playwright test e2e/closure.spec.ts",
+    "e2e:full": "playwright test e2e/full-regression.spec.ts"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -16,6 +22,7 @@
     "react-router-dom": "^7.18.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^18.3.4",

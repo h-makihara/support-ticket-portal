@@ -84,4 +84,6 @@ Redmine 6.1 の標準ステータスを、ポータルでは次の業務ラベ�
 
 Docker Compose 一式を起動後、リポジトリルートで `runn` を実行します。個別シナリオは `tests/*.yaml` にあります。
 
+営業担当者とサポート担当者の画面操作をまたぐ業務フローは Playwright E2E で検証します。観点別テストとフルリグレッションの構成は [テストガイド](testing.md) を参照してください。
+
 参考: [Redmine REST API](https://www.redmine.org/projects/redmine/wiki/Rest_api)
