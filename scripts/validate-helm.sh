@@ -26,6 +26,16 @@ helm lint deploy/chart \
 
 for environment in int dev stg prd; do
   rendered="$(helmfile --environment "$environment" template)"
+  expected_ingress_class="traefik"
+  if [[ "$environment" == "int" ]]; then
+    expected_ingress_class="traefik-int"
+    grep -q 'kind: IngressClass' <<<"$rendered"
+    grep -q 'name: traefik-int' <<<"$rendered"
+  elif grep -q 'app.kubernetes.io/name: traefik' <<<"$rendered"; then
+    echo "$environment must not render the bundled Traefik release" >&2
+    exit 1
+  fi
+  grep -q "ingressClassName: $expected_ingress_class" <<<"$rendered"
   if [[ "$environment" == "stg" || "$environment" == "prd" ]]; then
     if grep -Eq 'image: "(otel/opentelemetry-collector-contrib|grafana/alloy):latest"' <<<"$rendered"; then
       echo "$environment must pin OpenTelemetry Collector and Alloy image tags" >&2

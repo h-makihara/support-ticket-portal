@@ -35,7 +35,8 @@ Collector/Alloyイメージはint/devで `latest`、stg/prdで固定タグを使
 
 - Kubernetes クラスタと、そのクラスタを指す現在の kube-context
 - Helm 3、Helmfile、kubectl
-- `IngressClass` 名 `traefik` の Traefik Ingress Controller
+- Traefikを同時導入しない環境では、valuesの`traefik.externalIngressClass`と同名の既存Ingress Controller
+- Traefikを同時導入する環境では、公式Helm repository `https://traefik.github.io/charts`へのネットワークアクセス
 - 動的 PVC provisioning が可能な既定 StorageClass、または values の `persistence.storageClass`
 - クラスタから pull できる Backend/Frontend コンテナイメージ
 
@@ -70,6 +71,35 @@ kubectl -n support-ticket-portal-int get pods,ingress
 
 環境名を `dev`、`stg`、`prd` に変えると、values、Namespace、イメージタグ、Ingress host、テストユーザー設定がまとめて切り替わります。
 
+### Traefikを一緒に導入・破棄するか切り替える
+
+各[環境別values](../deploy/environments/int.yaml)の`traefik.install`で切り替えます。
+
+組み込みTraefikは公式chart `traefik/traefik` のversion `41.2.0`へ固定しています。
+
+```yaml
+traefik:
+  install: true
+  bundledIngressClass: traefik-int
+  externalIngressClass: traefik
+  serviceType: LoadBalancer
+```
+
+- `install: true`: 環境専用Traefikをアプリより先に導入します。`helmfile destroy`ではアプリと一緒に削除します。
+- `install: false`: Traefik releaseを作らず、`externalIngressClass`で指定した既存Controllerを利用します。以前`true`で導入したTraefikがあれば、次回`sync`で削除します。
+
+`install`だけを切り替えれば、Portal/RedmineのIngressClassも`bundledIngressClass`と`externalIngressClass`の間で自動的に切り替わります。同じクラスタへ複数環境のTraefikを導入する場合は、`traefik-int`、`traefik-dev`のように環境ごとに異なる`bundledIngressClass`を指定してください。組み込みTraefikはIngressClass参照のためClusterRoleを作成しますが、リソースの監視対象は`support-ticket-portal-<env>` Namespaceだけに制限します。標準Ingressだけを使用するため、Traefik CRDは導入しません。
+
+Docker Desktopでは`serviceType: LoadBalancer`により、通常はHTTP/HTTPSがlocalhostの80/443番へ公開されます。クラスタがLoadBalancer Serviceに対応しない場合は、環境に応じてNodePortや外部LoadBalancerの設定が必要です。
+
+設定変更後は通常どおり同期します。
+
+```bash
+./scripts/helmfile-deploy.sh int sync
+kubectl -n support-ticket-portal-int get pods,service,ingress
+kubectl get ingressclass
+```
+
 `template` は Secret の内容も標準出力へ render するため、出力をログや共有ファイルへ保存しないでください。
 
 ## バックアップして環境を破棄する
@@ -79,7 +109,7 @@ kubectl -n support-ticket-portal-int get pods,ingress
 1. 書き込みを止める。
 2. PostgreSQL と Redmine 添付ファイルをバックアップする。
 3. バックアップを検証する。
-4. Helm release を削除する。
+4. アプリと、管理対象の場合はTraefikのHelm releaseを削除する。
 5. Namespace、PVC、PV の残存を確認して完全に削除する。
 
 Redmine の主要データは PostgreSQL にありますが、添付ファイルは `redmine-files` PVC にあります。どちらか一方だけでは完全なバックアップになりません。また、再構築には同じ環境の values、イメージバージョン、シークレットも必要です。
@@ -154,13 +184,14 @@ tar -tzf "$BACKUP_DIR/redmine-files.tar.gz" >/dev/null
 
 ### 5. Helm release の削除
 
-バックアップ検証後に release を削除します。この操作により Deployment、Service、Ingress、Secret、および Helm が直接管理する `redmine-files` PVC が削除されます。先に実行すると添付ファイルを回収できなくなる可能性があります。
+バックアップ検証後に release を削除します。`traefik.install: true`の場合は依存関係の逆順でアプリ、Traefikの順に両releaseを削除します。この操作により Deployment、Service、Ingress、Secret、および Helm が直接管理する `redmine-files` PVC が削除されます。先に実行すると添付ファイルを回収できなくなる可能性があります。
 
 ```bash
 ./scripts/helmfile-deploy.sh "$ENVIRONMENT" destroy
 
 helm -n "$NAMESPACE" list --all
 kubectl -n "$NAMESPACE" get all,ingress,pvc
+kubectl get ingressclass
 ```
 
 PostgreSQL StatefulSet の `volumeClaimTemplates` から作られた PVC は、release 削除後も残る場合があります。`helmfile destroy` だけを完全破棄とは見なさないでください。
@@ -208,6 +239,8 @@ url:
 例えば `url.namespace: namespace` の場合、int の Redmine URL は `namespace-int-redmine.localhost` になります。
 
 Redmine の host は常に同じ規則で計算されますが、管理画面の外部公開を避けるため `redmineIngress.enabled` の既定値は `false` です。必要な環境だけ `true` にしてください。
+
+組み込みTraefikを使う場合、IngressClassは環境別`traefik.bundledIngressClass`からPortalとRedmineのIngressへ自動設定されます。既存Controllerを使う場合は`traefik.externalIngressClass`が設定されます。
 
 TLS を有効化する場合は `ingress.tls.enabled: true` と既存 TLS Secret 名を設定し、`app.sessionCookieSecure: true` にします。cert-manager を使う場合は `ingress.annotations` に issuer annotation を追加します。
 

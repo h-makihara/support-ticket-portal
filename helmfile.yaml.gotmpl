@@ -3,6 +3,12 @@ helmDefaults:
   timeout: 600
   atomic: true
   createNamespace: true
+  # This stack uses standard Ingress only; do not install Traefik's cluster-wide CRDs.
+  skipCRDs: true
+
+repositories:
+  - name: traefik
+    url: https://traefik.github.io/charts
 
 environments:
   int:
@@ -20,12 +26,47 @@ environments:
 
 ---
 releases:
+  - name: support-ticket-portal-{{ .Environment.Name }}-traefik
+    namespace: support-ticket-portal-{{ .Environment.Name }}
+    chart: traefik/traefik
+    version: 41.2.0
+    installed: {{ .Values.traefik.install }}
+    values:
+      - ingressClass:
+          enabled: true
+          isDefaultClass: false
+          name: {{ .Values.traefik.bundledIngressClass | quote }}
+        providers:
+          kubernetesCRD:
+            enabled: false
+          kubernetesIngress:
+            enabled: true
+            ingressClass: {{ .Values.traefik.bundledIngressClass | quote }}
+            namespaces:
+              - support-ticket-portal-{{ .Environment.Name }}
+        rbac:
+          enabled: true
+          # IngressClass is cluster-scoped, so the controller needs ClusterRole access.
+          # Resource watching remains limited by providers.kubernetesIngress.namespaces.
+          namespaced: false
+        service:
+          spec:
+            type: {{ .Values.traefik.serviceType | quote }}
+
   - name: support-ticket-portal-{{ .Environment.Name }}
     namespace: support-ticket-portal-{{ .Environment.Name }}
     chart: ./deploy/chart
+    {{- if .Values.traefik.install }}
+    needs:
+      - support-ticket-portal-{{ .Environment.Name }}/support-ticket-portal-{{ .Environment.Name }}-traefik
+    {{- end }}
     values:
       - deploy/environments/{{ .Environment.Name }}.yaml
       - environment: {{ .Environment.Name | quote }}
+        ingress:
+          className: {{ if .Values.traefik.install }}{{ .Values.traefik.bundledIngressClass | quote }}{{ else }}{{ .Values.traefik.externalIngressClass | quote }}{{ end }}
+        redmineIngress:
+          className: {{ if .Values.traefik.install }}{{ .Values.traefik.bundledIngressClass | quote }}{{ else }}{{ .Values.traefik.externalIngressClass | quote }}{{ end }}
         secrets:
           redmineApiKey: {{ requiredEnv "REDMINE_API_KEY" | quote }}
           redmineSecretKeyBase: {{ requiredEnv "REDMINE_SECRET_KEY_BASE" | quote }}

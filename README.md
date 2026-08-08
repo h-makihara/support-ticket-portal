@@ -75,6 +75,8 @@ make regression
 
 既存の Docker Compose に加えて、Helmfile で `int` / `dev` / `stg` / `prd` を切り替えて Kubernetes へデプロイできます。環境ごとに Namespace、環境変数、イメージタグ、`<namespace>-<env>-<feature>.<domain>` 形式の Traefik Ingress host が切り替わります。既定の Portal URL は `support-ticket-portal-int-portal.localhost` の形式です。int/dev/stg では環境専用テストユーザーによる E2E も実行できます。
 
+環境別valuesの`traefik.install`により、環境専用Traefikをアプリと一緒に導入・破棄するか、既存Ingress Controllerを利用するか選択できます。
+
 ```bash
 cp deploy/env/int.env.example deploy/env/int.env
 # deploy/env/int.env のシークレットを設定

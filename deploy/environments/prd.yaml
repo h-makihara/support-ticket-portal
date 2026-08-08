@@ -1,3 +1,9 @@
+traefik:
+  install: false
+  bundledIngressClass: traefik-prd
+  externalIngressClass: traefik
+  serviceType: LoadBalancer
+
 images:
   backend: {repository: support-ticket-portal/backend, tag: prd, pullPolicy: IfNotPresent}
   frontend: {repository: support-ticket-portal/frontend, tag: prd, pullPolicy: IfNotPresent}
