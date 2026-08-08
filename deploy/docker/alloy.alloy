@@ -1,0 +1,29 @@
+// Docker Compose-specific Alloy gateway configuration.
+// Kubernetes uses deploy/chart/templates/observability.yaml instead.
+otelcol.receiver.otlp "gateway" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    logs    = [otelcol.processor.batch.gateway.input]
+    metrics = [otelcol.processor.batch.gateway.input]
+    traces  = [otelcol.processor.batch.gateway.input]
+  }
+}
+
+otelcol.processor.batch "gateway" {
+  output {
+    logs    = [otelcol.exporter.otlphttp.external.input]
+    metrics = [otelcol.exporter.otlphttp.external.input]
+    traces  = [otelcol.exporter.otlphttp.external.input]
+  }
+}
+
+otelcol.exporter.otlphttp "external" {
+  client {
+    endpoint = sys.env("EXTERNAL_OTLP_ENDPOINT")
+  }
+}

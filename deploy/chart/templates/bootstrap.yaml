@@ -32,7 +32,9 @@ spec:
         - name: bootstrap
           image: "{{ .Values.images.redmine.repository }}:{{ .Values.images.redmine.tag }}"
           imagePullPolicy: {{ .Values.images.redmine.pullPolicy }}
-          command: ["bundle", "exec", "rails", "runner", "/bootstrap/bootstrap_redmine.rb"]
+          # Keep the image ENTRYPOINT so it generates config/database.yml from
+          # the REDMINE_DB_* environment variables before running the script.
+          args: ["bundle", "exec", "rails", "runner", "/bootstrap/bootstrap_redmine.rb"]
           env:
             - {name: REDMINE_DB_POSTGRES, value: postgres}
             - {name: REDMINE_DB_USER, value: postgres}

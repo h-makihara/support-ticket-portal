@@ -10,8 +10,12 @@ Browser
                  ├─ Redmine REST API (:3000)
                  │    └─ PostgreSQL 15
                  ├─ Redis 7.4 (session)
-                 └─ OpenTelemetry OTLP
-                      └─ Tempo (:4317 / :3200)
+                 └─ OTLP/HTTP (:4318, localhost)
+                      └─ OpenTelemetry Collector (same Pod sidecar)
+                           └─ OTLP/HTTP
+                                └─ Grafana Alloy (gateway Pod)
+                                     └─ OTLP/HTTP
+                                          └─ External observability backend
 ```
 
 nginx は `/api/*` を Backend に転送します。Frontend が Redmine API を直接呼ぶことはありません。
@@ -38,8 +42,21 @@ nginx は `/api/*` を Backend に転送します。Frontend が Redmine API を
 
 ## 可観測性
 
-FastAPI のリクエストと httpx による Redmine API 呼び出しを OpenTelemetry で計測し、OTLP gRPC で Tempo へ送信します。ヘルスチェックは `GET /health` で、設定値を含まない liveness 応答のみを返します。
+FastAPI のリクエストと httpx による Redmine API 呼び出しを OpenTelemetry で計測します。Backend はトレースとPythonログをOTLP/HTTPで同一PodのCollectorへ送り、Collectorは別PodのGrafana Alloyへ、Alloyは外部の可観測性基盤へ転送します。
+
+Backendのログレベルは既定でDEBUGです。Sidecar CollectorではINFO（severity number 9）未満を除外しますが、ログ属性 `ticket.portal.debug_enabled=true` が付いたレコードだけはDEBUGでも通過します。将来バックエンドで対象ログへ属性を付ける場合は、次のように指定できます。
+
+```python
+logger.debug(
+    "diagnostic details",
+    extra={"ticket.portal.debug_enabled": True},
+)
+```
+
+属性名はHelm valuesの `observability.debugLogFlagAttribute` で変更できます。ヘルスチェックは `GET /health` で、設定値を含まないliveness応答のみを返します。
 
 ## デプロイ
 
-現行の提供形態は Docker Compose です。Kubernetes / Helm 定義はこのリポジトリには含まれていません。
+Docker Composeによるローカル実行に加え、Helmfileでint/dev/stg/prd環境へデプロイできます。
+
+OpenTelemetry設定は実行方式ごとに分離しています。Docker Composeは `deploy/docker/otel-collector.yaml` と `deploy/docker/alloy.alloy` を参照し、Kubernetesは `deploy/chart/templates/observability.yaml` が生成するConfigMapを参照します。

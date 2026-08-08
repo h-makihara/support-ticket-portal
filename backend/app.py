@@ -14,7 +14,11 @@ from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.resources import Resource
@@ -24,6 +28,19 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from backend.auth import SessionData, SessionStore, authenticate_with_redmine
 
 logger = logging.getLogger(__name__)
+
+
+# Keep DEBUG records available to the local Collector. The Collector applies the
+# environment-wide INFO threshold and owns the attribute-based DEBUG exception.
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+logging.getLogger().setLevel(getattr(logging, LOG_LEVEL, logging.DEBUG))
+
+
+class _ExcludeOpenTelemetryInternalLogs(logging.Filter):
+    """Prevent exporter failures from recursively exporting themselves."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.name.startswith("opentelemetry")
 
 
 @asynccontextmanager
@@ -36,22 +53,45 @@ async def lifespan(_: FastAPI):
     )
     yield
     await session_store.close()
+    if logger_provider is not None:
+        logger_provider.shutdown()
+    if tracer_provider is not None:
+        tracer_provider.shutdown()
 
 
 # ── OpenTelemetry setup ─────────────────────────────────────────────
 
-OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
+OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+OTEL_ENDPOINT = OTEL_ENDPOINT.rstrip("/")
+OTEL_DISABLED = os.getenv("OTEL_SDK_DISABLED", "false").lower() in ("1", "true", "yes")
 
 resource = Resource.create({
     "service.name": "ticket-portal-backend",
-    "service.version": "0.1.0",
+    "service.version": "0.4.0",
 })
 
-trace.set_tracer_provider(TracerProvider(resource=resource))
-tracer = trace.get_tracer("ticket-portal")
+tracer_provider: Optional[TracerProvider] = None
+logger_provider: Optional[LoggerProvider] = None
 
-span_exporter = OTLPSpanExporter(endpoint=OTEL_ENDPOINT, insecure=True)
-trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(span_exporter))
+if not OTEL_DISABLED:
+    tracer_provider = TracerProvider(resource=resource)
+    trace.set_tracer_provider(tracer_provider)
+    tracer_provider.add_span_processor(
+        BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{OTEL_ENDPOINT}/v1/traces"))
+    )
+
+    logger_provider = LoggerProvider(resource=resource)
+    set_logger_provider(logger_provider)
+    logger_provider.add_log_record_processor(
+        BatchLogRecordProcessor(OTLPLogExporter(endpoint=f"{OTEL_ENDPOINT}/v1/logs"))
+    )
+    otel_log_handler = LoggingHandler(
+        level=logging.DEBUG, logger_provider=logger_provider
+    )
+    otel_log_handler.addFilter(_ExcludeOpenTelemetryInternalLogs())
+    logging.getLogger().addHandler(otel_log_handler)
+
+tracer = trace.get_tracer("ticket-portal")
 
 # ── App ─────────────────────────────────────────────────────────────
 

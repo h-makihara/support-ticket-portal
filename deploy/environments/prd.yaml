@@ -1,6 +1,8 @@
 images:
   backend: {repository: support-ticket-portal/backend, tag: prd, pullPolicy: IfNotPresent}
   frontend: {repository: support-ticket-portal/frontend, tag: prd, pullPolicy: IfNotPresent}
+  otelCollector: {repository: otel/opentelemetry-collector-contrib, tag: "0.158.0", pullPolicy: IfNotPresent}
+  alloy: {repository: grafana/alloy, tag: "v1.18.1", pullPolicy: IfNotPresent}
 app:
   replicas: 2
   enableTestUsers: false

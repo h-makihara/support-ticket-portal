@@ -12,7 +12,7 @@ Redmine をチケット基盤として利用する、社内問い合わせ向け
 - 回答者向けキューでの現在／前回対応者表示
 - コメントと項目変更をまとめた監査ログ
 - Redis を利用した6時間のサーバーサイドセッション
-- OpenTelemetry によるバックエンドと Redmine API 呼び出しのトレース
+- OpenTelemetry Collector sidecarとGrafana Alloy gatewayによるログ・トレース転送
 
 ## 構成
 
@@ -23,7 +23,7 @@ Redmine をチケット基盤として利用する、社内問い合わせ向け
 | Redmine | Redmine 6.1 | http://localhost:3000 |
 | Session store | Redis 7.4 | コンテナ内部のみ |
 | Database | PostgreSQL 15 | コンテナ内部のみ |
-| Tracing | Grafana Tempo | http://localhost:3200 |
+| Telemetry gateway | Grafana Alloy | http://localhost:12345 |
 
 ## クイックスタート
 

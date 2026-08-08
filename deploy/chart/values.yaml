@@ -26,8 +26,12 @@ images:
     repository: redis
     tag: "7.4-alpine"
     pullPolicy: IfNotPresent
-  tempo:
-    repository: grafana/tempo
+  otelCollector:
+    repository: otel/opentelemetry-collector-contrib
+    tag: latest
+    pullPolicy: IfNotPresent
+  alloy:
+    repository: grafana/alloy
     tag: latest
     pullPolicy: IfNotPresent
 
@@ -84,10 +88,15 @@ resources:
   redmine: {}
   postgres: {}
   redis: {}
-  tempo: {}
+  otelCollector: {}
+  alloy: {}
 
 observability:
-  tempoEnabled: true
+  enabled: true
+  # Alloy appends the standard /v1/{logs,metrics,traces} OTLP/HTTP paths.
+  externalOtlpEndpoint: "http://observability.example.invalid:4318"
+  # A DEBUG log carrying this boolean log attribute is allowed by the sidecar.
+  debugLogFlagAttribute: "ticket.portal.debug_enabled"
 
 secrets:
   redmineApiKey: ""

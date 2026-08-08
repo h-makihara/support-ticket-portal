@@ -25,7 +25,16 @@ helm lint deploy/chart \
   --set secrets.testSalesPassword="$TEST_SALES_PASSWORD"
 
 for environment in int dev stg prd; do
-  helmfile --environment "$environment" template >/dev/null
+  rendered="$(helmfile --environment "$environment" template)"
+  if [[ "$environment" == "stg" || "$environment" == "prd" ]]; then
+    if grep -Eq 'image: "(otel/opentelemetry-collector-contrib|grafana/alloy):latest"' <<<"$rendered"; then
+      echo "$environment must pin OpenTelemetry Collector and Alloy image tags" >&2
+      exit 1
+    fi
+  else
+    grep -q 'image: "otel/opentelemetry-collector-contrib:latest"' <<<"$rendered"
+    grep -q 'image: "grafana/alloy:latest"' <<<"$rendered"
+  fi
 done
 
 echo "Helm/Helmfile validation passed for int, dev, stg, and prd"

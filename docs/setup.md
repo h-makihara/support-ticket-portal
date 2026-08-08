@@ -39,9 +39,11 @@ docker compose up --build -d
 | Backend API / Swagger UI | http://localhost:8000/docs |
 | Backend health | http://localhost:8000/health |
 | Redmine | http://localhost:3000 |
-| Tempo | http://localhost:3200 |
+| Grafana Alloy status | http://localhost:12345 |
 
 ポータルには Redmine アカウントでログインします。Redmine の初期管理者は初回ログイン後にパスワード変更が必要です。
+
+Alloyの外部OTLP/HTTP転送先は `.env` の `EXTERNAL_OTLP_ENDPOINT` で指定します。既定の `.invalid` URLは設定漏れを明示するためのプレースホルダーなので、実際の可観測性基盤のベースURLへ変更してください。
 
 ## ローカル開発
 

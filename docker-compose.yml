@@ -71,12 +71,15 @@ services:
       REDMINE_TRACKER_ID: "${REDMINE_TRACKER_ID:-3}"
       REDIS_URL: "redis://redis:6379/0"
       SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-false}"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "tempo:4317"
+      LOG_LEVEL: "DEBUG"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
     depends_on:
       redmine:
         condition: service_healthy
       redis:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
 
   redis:
     image: redis:7.4-alpine
@@ -98,18 +101,30 @@ services:
     depends_on:
       - backend
 
-  # ── OpenTelemetry tracing (Tempo) ────────────────────────────────
-  tempo:
-    image: grafana/tempo:latest
-    container_name: ticket_tempo
-    command: [ "-config.file=/etc/tempo.yaml" ]
-    ports:
-      - "4317:4317"   # OTLP gRPC (ingest)
-      - "3200:3200"   # HTTP UI
+  # Docker Compose has no Pod-local network namespace, so Backend uses the
+  # collector service name instead of the Kubernetes sidecar's localhost.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: ticket_otel_collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
-      - ./tempo-config.yml:/etc/tempo.yaml:ro
+      - ./deploy/docker/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
     depends_on:
-      - postgres
+      - alloy
+
+  alloy:
+    image: grafana/alloy:latest
+    container_name: ticket_alloy
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+    environment:
+      EXTERNAL_OTLP_ENDPOINT: "${EXTERNAL_OTLP_ENDPOINT:-http://observability.example.invalid:4318}"
+    ports:
+      - "12345:12345"
+    volumes:
+      - ./deploy/docker/alloy.alloy:/etc/alloy/config.alloy:ro
 
 volumes:
   redmine_data:

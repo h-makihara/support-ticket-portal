@@ -13,7 +13,23 @@ Docker Compose は従来どおりローカル開発に利用できます。Kuber
 
 ホスト名は `<namespace>-<environment>-<feature>.<domain>` の規則で生成します。既定値では namespace が `support-ticket-portal`、environment が `int` など、feature が `portal` または `redmine` です。環境固有値は `deploy/environments/<env>.yaml`、シークレットは Git 管理外の `deploy/env/<env>.env` に分離されています。Backend 固有の環境変数は各 values の `app.backendEnv` に追加でき、既定で `DEPLOY_ENVIRONMENT` が環境名へ切り替わります。
 
-Chart は Frontend、Backend、Redmine、PostgreSQL、Redis、Tempo、Traefik Ingress と、Redmine のプロジェクト・ロール・ワークフロー・テストユーザーを作る冪等な bootstrap Job を含みます。
+Chart は Frontend、Backend（OpenTelemetry Collector sidecar）、Grafana Alloy gateway、Redmine、PostgreSQL、Redis、Traefik Ingress と、Redmine のプロジェクト・ロール・ワークフロー・テストユーザーを作る冪等な bootstrap Job を含みます。
+
+Docker Compose用のCollector/Alloy設定は `deploy/docker` に分離されています。Helm Chartはそれらを参照せず、Kubernetes専用の `templates/observability.yaml` からConfigMapを生成します。
+
+## OpenTelemetry転送先
+
+Alloyから外部可観測性基盤へ送るOTLP/HTTPのベースURLを、環境別valuesで設定します。URLには `/v1/logs` 等のsignal pathを含めません。未設定事故を見分けやすくするため既定値は到達不能な `.invalid` ドメインです。実環境へのデプロイ前に必ず置き換えてください。
+
+```yaml
+observability:
+  externalOtlpEndpoint: "https://otel.example.com:4318"
+  debugLogFlagAttribute: "ticket.portal.debug_enabled"
+```
+
+Backendは `http://localhost:4318` のsidecarへログとトレースを送ります。sidecarはINFO以上、および `debugLogFlagAttribute` で指定したboolean属性が `true` のDEBUGログだけをAlloyへ通します。パイプラインはmetricsも受信・転送できるため、Backend側でmetricsを追加した際にGateway構成を変更する必要はありません。
+
+Collector/Alloyイメージはint/devで `latest`、stg/prdで固定タグを使用します。現在の固定値はCollector `0.158.0`、Alloy `v1.18.1` です。
 
 ## 前提
 
@@ -212,6 +228,8 @@ int/dev/stg の bootstrap Job は次のアカウントを作ります。
 
 共有クラスタなど既定ホスト名を変更した場合は `E2E_BASE_URL=https://... ./scripts/helmfile-e2e.sh stg` のように上書きします。prd はスクリプト側でも拒否し、テストユーザーを作りません。
 
+既定の `.localhost` Ingressへ接続できない場合、E2EスクリプトはFrontend Serviceを `127.0.0.1:18080` へ一時的にport-forwardしてテストを続行します。ポートは `E2E_PORT_FORWARD_PORT` で変更できます。明示的に `E2E_BASE_URL` を設定した場合は自動フォールバックしません。
+
 ## 検証と保守
 
 ```bash
@@ -228,5 +246,5 @@ make helm-validate
 2. 環境別の実ドメイン、Traefik の IngressClass 名、DNS の管理先
 3. TLS の発行方法と Secret 名
 4. StorageClass、PVC 容量、バックアップ/リストア方針
-5. 本番の replica/resource requests/limits と Tempo の永続化・外部 observability 基盤
+5. 本番の replica/resource requests/limits、Alloyの外部OTLP転送先と認証・TLS要件
 6. `.env` の代わりに External Secrets、SOPS、Vault 等を使うか
