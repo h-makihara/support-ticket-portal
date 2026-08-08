@@ -80,6 +80,7 @@ make regression
 ```bash
 cp deploy/env/int.env.example deploy/env/int.env
 # deploy/env/int.env のシークレットを設定
+./scripts/helmfile-deploy.sh int info
 ./scripts/helmfile-deploy.sh int sync
 ./scripts/helmfile-e2e.sh int
 ```

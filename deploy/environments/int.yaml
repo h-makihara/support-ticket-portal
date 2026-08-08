@@ -10,10 +10,7 @@ images:
   otelCollector: {repository: otel/opentelemetry-collector-contrib, tag: latest, pullPolicy: Always}
   alloy: {repository: grafana/alloy, tag: latest, pullPolicy: Always}
 app:
-  enableTestUsers: true
   sessionCookieSecure: false
   backendEnv: {DEPLOY_ENVIRONMENT: int}
   testUsers:
-    admin: {username: int-admin, email: int-admin@example.invalid}
-    support: {username: int-support, email: int-support@example.invalid}
-    sales: {username: int-sales, email: int-sales@example.invalid}
+    enabled: true

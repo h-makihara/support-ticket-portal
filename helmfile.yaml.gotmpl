@@ -63,6 +63,9 @@ releases:
     values:
       - deploy/environments/{{ .Environment.Name }}.yaml
       - environment: {{ .Environment.Name | quote }}
+        app:
+          testUsers:
+            usernamePrefix: {{ .Environment.Name | quote }}
         ingress:
           className: {{ if .Values.traefik.install }}{{ .Values.traefik.bundledIngressClass | quote }}{{ else }}{{ .Values.traefik.externalIngressClass | quote }}{{ end }}
         redmineIngress:

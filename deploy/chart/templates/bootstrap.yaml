@@ -50,19 +50,19 @@ spec:
                 secretKeyRef: {name: support-ticket-portal-secrets, key: REDMINE_API_KEY}
             - {name: REDMINE_PROJECT_ID, value: {{ .Values.app.redmineProjectId | quote }}}
             - {name: REDMINE_PROJECT_IDENTIFIER, value: {{ .Values.app.redmineProjectIdentifier | quote }}}
-            - {name: ENABLE_TEST_USERS, value: {{ .Values.app.enableTestUsers | quote }}}
-            - {name: TEST_ADMIN_USERNAME, value: {{ .Values.app.testUsers.admin.username | quote }}}
-            - {name: TEST_ADMIN_EMAIL, value: {{ .Values.app.testUsers.admin.email | quote }}}
+            - {name: ENABLE_TEST_USERS, value: {{ .Values.app.testUsers.enabled | quote }}}
+            - {name: TEST_ADMIN_USERNAME, value: {{ include "portal.testUsername" (dict "root" . "role" "admin") | quote }}}
+            - {name: TEST_ADMIN_EMAIL, value: {{ include "portal.testEmail" (dict "root" . "role" "admin") | quote }}}
             - name: TEST_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef: {name: support-ticket-portal-secrets, key: TEST_ADMIN_PASSWORD}
-            - {name: TEST_SUPPORT_USERNAME, value: {{ .Values.app.testUsers.support.username | quote }}}
-            - {name: TEST_SUPPORT_EMAIL, value: {{ .Values.app.testUsers.support.email | quote }}}
+            - {name: TEST_SUPPORT_USERNAME, value: {{ include "portal.testUsername" (dict "root" . "role" "support") | quote }}}
+            - {name: TEST_SUPPORT_EMAIL, value: {{ include "portal.testEmail" (dict "root" . "role" "support") | quote }}}
             - name: TEST_SUPPORT_PASSWORD
               valueFrom:
                 secretKeyRef: {name: support-ticket-portal-secrets, key: TEST_SUPPORT_PASSWORD}
-            - {name: TEST_SALES_USERNAME, value: {{ .Values.app.testUsers.sales.username | quote }}}
-            - {name: TEST_SALES_EMAIL, value: {{ .Values.app.testUsers.sales.email | quote }}}
+            - {name: TEST_SALES_USERNAME, value: {{ include "portal.testUsername" (dict "root" . "role" "sales") | quote }}}
+            - {name: TEST_SALES_EMAIL, value: {{ include "portal.testEmail" (dict "root" . "role" "sales") | quote }}}
             - name: TEST_SALES_PASSWORD
               valueFrom:
                 secretKeyRef: {name: support-ticket-portal-secrets, key: TEST_SALES_PASSWORD}

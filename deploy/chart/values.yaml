@@ -43,19 +43,12 @@ app:
   redmineTrackerId: "4"
   redmineProjectIdentifier: internal-inquiry
   sessionCookieSecure: false
-  enableTestUsers: true
   # Environment-specific backend variables. Values are rendered as strings.
   backendEnv: {}
   testUsers:
-    admin:
-      username: test-admin
-      email: test-admin@example.invalid
-    support:
-      username: test-support
-      email: test-support@example.invalid
-    sales:
-      username: test-sales
-      email: test-sales@example.invalid
+    enabled: true
+    usernamePrefix: test
+    emailDomain: example.invalid
 
 ingress:
   enabled: true

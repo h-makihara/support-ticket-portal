@@ -108,6 +108,8 @@ Backend はログインした利用者の Redmine API キーを Redis に6時間
 - 本番 HTTPS: `SESSION_COOKIE_SECURE=true`
 - 別 Origin の Frontend を許可する場合: Backend の `CORS_ORIGINS` をカンマ区切りで設定
 
+Kubernetes/Helmfile環境の構築、環境別テストユーザー、Traefik、バックアップと破棄は[Helmfileデプロイガイド](helmfile.md)を参照してください。
+
 ## 検証ユーザー
 
 初期化時に検証ユーザーを作成する場合だけ、`.env` で `ENABLE_TEST_USERS=true` とし、すべての `TEST_*_USERNAME`、`TEST_*_PASSWORD`、`TEST_*_EMAIL` を設定します。本番環境では必ず無効のままにしてください。

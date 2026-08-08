@@ -4,7 +4,7 @@
 
 変更箇所に近いテストを短いフィードバック用に使い、業務フローを横断する変更ではフルリグレッションを実行します。ブラウザーE2Eは実データとしてチケットを作成するため、ローカルまたは検証専用環境で実行してください。
 
-## 前提
+## Docker Composeでの前提
 
 1. Docker Compose 一式が起動し、ポータルへ `E2E_BASE_URL`（既定値 `http://localhost:3001`）でアクセスできる。
 2. `ENABLE_TEST_USERS=true` で初期化した営業担当者・サポート担当者が存在する。
@@ -14,6 +14,23 @@
 4. `frontend` で `npm ci` を実行済みで、`make e2e-install` により Chromium をインストール済みである。
 
 CIなどで `.env` を使わない場合は、`E2E_SALES_USERNAME/PASSWORD` と `E2E_SUPPORT_USERNAME/PASSWORD` を設定します。`E2E_*` が `TEST_*` より優先されます。認証情報はレポートへ出力しません。
+
+## Helmfile環境での前提
+
+int/dev/stgでは、環境名から`<env>-sales`と`<env>-support`を生成し、`deploy/env/<env>.env`の対応するパスワードを使用します。ユーザー名と設定場所は次のコマンドで確認できます。
+
+```bash
+./scripts/helmfile-deploy.sh int info
+```
+
+デプロイ後は専用スクリプトから実行します。
+
+```bash
+./scripts/helmfile-e2e.sh int
+./scripts/helmfile-e2e.sh stg e2e/ticket-creation.spec.ts
+```
+
+Ingressへ接続できない場合はFrontend Serviceへのport-forwardへ自動フォールバックします。共有クラスタなどURLが異なる場合は`E2E_BASE_URL`を明示します。prdではテストユーザーを作らず、このスクリプトも実行できません。
 
 ## 観点別E2E
 

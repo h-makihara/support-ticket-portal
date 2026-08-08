@@ -11,10 +11,7 @@ images:
   alloy: {repository: grafana/alloy, tag: "v1.18.1", pullPolicy: IfNotPresent}
 app:
   replicas: 2
-  enableTestUsers: false
   sessionCookieSecure: false
   backendEnv: {DEPLOY_ENVIRONMENT: prd}
   testUsers:
-    admin: {username: disabled, email: disabled@example.invalid}
-    support: {username: disabled, email: disabled@example.invalid}
-    sales: {username: disabled, email: disabled@example.invalid}
+    enabled: false

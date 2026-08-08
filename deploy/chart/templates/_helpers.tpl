@@ -22,3 +22,11 @@ storageClassName: {{ .Values.persistence.storageClass | quote }}
 {{- define "portal.redmineHost" -}}
 {{- .Values.redmineIngress.host | default (printf "%s-%s-redmine.%s" .Values.url.namespace .Values.environment .Values.url.domain) -}}
 {{- end }}
+
+{{- define "portal.testUsername" -}}
+{{- printf "%s-%s" .root.Values.app.testUsers.usernamePrefix .role -}}
+{{- end }}
+
+{{- define "portal.testEmail" -}}
+{{- printf "%s@%s" (include "portal.testUsername" .) .root.Values.app.testUsers.emailDomain -}}
+{{- end }}

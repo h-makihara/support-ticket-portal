@@ -4,6 +4,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# shellcheck source=scripts/lib/helmfile-env.sh
+source "$ROOT_DIR/scripts/lib/helmfile-env.sh"
+
+assert_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+  if ! grep -Fq "$needle" <<<"$haystack"; then
+    echo "$message" >&2
+    exit 1
+  fi
+}
+
 if ! cmp -s scripts/bootstrap_redmine.rb deploy/chart/files/bootstrap_redmine.rb; then
   echo "deploy/chart/files/bootstrap_redmine.rb is out of sync with scripts/bootstrap_redmine.rb" >&2
   exit 1
@@ -25,17 +38,33 @@ helm lint deploy/chart \
   --set secrets.testSalesPassword="$TEST_SALES_PASSWORD"
 
 for environment in int dev stg prd; do
+  portal_select_environment "$environment"
   rendered="$(helmfile --environment "$environment" template)"
-  expected_ingress_class="traefik"
-  if [[ "$environment" == "int" ]]; then
-    expected_ingress_class="traefik-int"
-    grep -q 'kind: IngressClass' <<<"$rendered"
-    grep -q 'name: traefik-int' <<<"$rendered"
+  traefik_install="$(portal_environment_value traefik install)"
+  bundled_class="$(portal_environment_value traefik bundledIngressClass)"
+  external_class="$(portal_environment_value traefik externalIngressClass)"
+  test_users_enabled="$(portal_nested_environment_value app testUsers enabled)"
+
+  if [[ "$traefik_install" == "true" ]]; then
+    expected_ingress_class="$bundled_class"
+    assert_contains "$rendered" 'kind: IngressClass' "$environment must render the bundled Traefik IngressClass"
+    assert_contains "$rendered" "name: $bundled_class" "$environment must render IngressClass $bundled_class"
   elif grep -q 'app.kubernetes.io/name: traefik' <<<"$rendered"; then
     echo "$environment must not render the bundled Traefik release" >&2
     exit 1
+  else
+    expected_ingress_class="$external_class"
   fi
-  grep -q "ingressClassName: $expected_ingress_class" <<<"$rendered"
+  assert_contains "$rendered" "ingressClassName: $expected_ingress_class" "$environment must use IngressClass $expected_ingress_class"
+  assert_contains "$rendered" "host: \"${PORTAL_URL#*://}\"" "$environment Portal URL must match the shared script convention"
+
+  assert_contains "$rendered" "value: \"$test_users_enabled\"" "$environment must render its test-user enablement"
+  if [[ "$test_users_enabled" == "true" ]]; then
+    assert_contains "$rendered" "value: \"$environment-admin\"" "$environment must render its admin test user"
+    assert_contains "$rendered" "value: \"$environment-support\"" "$environment must render its support test user"
+    assert_contains "$rendered" "value: \"$environment-sales\"" "$environment must render its sales test user"
+  fi
+
   if [[ "$environment" == "stg" || "$environment" == "prd" ]]; then
     if grep -Eq 'image: "(otel/opentelemetry-collector-contrib|grafana/alloy):latest"' <<<"$rendered"; then
       echo "$environment must pin OpenTelemetry Collector and Alloy image tags" >&2

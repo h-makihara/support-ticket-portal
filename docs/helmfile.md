@@ -4,7 +4,7 @@ Docker Compose は従来どおりローカル開発に利用できます。Kuber
 
 ## 構成と環境切替
 
-| 環境 | Namespace | Portal host | Redmine host | テストユーザー |
+| 環境 | Namespace | Portal host | Redmine host（既定は非公開） | テストユーザー |
 |---|---|---|---|---|
 | int | `support-ticket-portal-int` | `support-ticket-portal-int-portal.localhost` | `support-ticket-portal-int-redmine.localhost` | 有効 |
 | dev | `support-ticket-portal-dev` | `support-ticket-portal-dev-portal.localhost` | `support-ticket-portal-dev-redmine.localhost` | 有効 |
@@ -12,6 +12,14 @@ Docker Compose は従来どおりローカル開発に利用できます。Kuber
 | prd | `support-ticket-portal-prd` | `support-ticket-portal-prd-portal.localhost` | `support-ticket-portal-prd-redmine.localhost` | 無効 |
 
 ホスト名は `<namespace>-<environment>-<feature>.<domain>` の規則で生成します。既定値では namespace が `support-ticket-portal`、environment が `int` など、feature が `portal` または `redmine` です。環境固有値は `deploy/environments/<env>.yaml`、シークレットは Git 管理外の `deploy/env/<env>.env` に分離されています。Backend 固有の環境変数は各 values の `app.backendEnv` に追加でき、既定で `DEPLOY_ENVIRONMENT` が環境名へ切り替わります。
+
+現在の環境情報は、シークレット値を表示せずに確認できます。
+
+```bash
+./scripts/helmfile-deploy.sh int info
+```
+
+このコマンドはNamespace、Portal/Redmine URL、Traefik方式、valuesとsecretファイルの場所、テストユーザー名と対応するパスワード変数名を表示します。
 
 Chart は Frontend、Backend（OpenTelemetry Collector sidecar）、Grafana Alloy gateway、Redmine、PostgreSQL、Redis、Traefik Ingress と、Redmine のプロジェクト・ロール・ワークフロー・テストユーザーを作る冪等な bootstrap Job を含みます。
 
@@ -246,13 +254,23 @@ TLS を有効化する場合は `ingress.tls.enabled: true` と既存 TLS Secret
 
 ## E2E
 
-int/dev/stg の bootstrap Job は次のアカウントを作ります。
+### テストユーザーの定義
 
-- `<env>-sales`
-- `<env>-support`
-- `<env>-admin`
+テストユーザーを有効にするかは[環境別values](../deploy/environments/int.yaml)の`app.testUsers.enabled`で定義します。ユーザー名はHelmfileの環境名から一意に生成され、環境別valuesやE2Eスクリプトへ個別に重複定義しません。
 
-パスワードは環境別 `.env` だけから取得します。デプロイ後の Playwright E2E は次のコマンドで実行します。
+| ロール | ユーザー名 | パスワード変数 |
+|---|---|---|
+| 管理者 | `<env>-admin` | `TEST_ADMIN_PASSWORD` |
+| サポート | `<env>-support` | `TEST_SUPPORT_PASSWORD` |
+| 営業 | `<env>-sales` | `TEST_SALES_PASSWORD` |
+
+例えばint環境では`int-admin`、`int-support`、`int-sales`です。パスワードの実値はGit管理外の`deploy/env/int.env`に置き、`deploy/env/int.env.example`は変数名を示す雛形としてのみ使います。
+
+Helmのpost-install/post-upgrade bootstrap Jobは、有効な環境でこれらのRedmineユーザーを作成または更新します。prdは`app.testUsers.enabled: false`であり、E2Eスクリプトもprdの実行を拒否します。
+
+### Playwrightの実行
+
+デプロイ後のPlaywright E2Eは次のコマンドで実行します。
 
 ```bash
 ./scripts/helmfile-e2e.sh int
@@ -263,6 +281,25 @@ int/dev/stg の bootstrap Job は次のアカウントを作ります。
 
 既定の `.localhost` Ingressへ接続できない場合、E2EスクリプトはFrontend Serviceを `127.0.0.1:18080` へ一時的にport-forwardしてテストを続行します。ポートは `E2E_PORT_FORWARD_PORT` で変更できます。明示的に `E2E_BASE_URL` を設定した場合は自動フォールバックしません。
 
+### ログインできない場合
+
+まず入力値と定義元を確認します。
+
+```bash
+./scripts/helmfile-deploy.sh int info
+kubectl -n support-ticket-portal-int get job,pod
+```
+
+bootstrap Jobは成功後に自動削除されるため、Jobが表示されないこと自体は異常ではありません。ユーザーの存在と有効状態をパスワードを表示せずに確認する場合は、次を実行します。
+
+```bash
+kubectl -n support-ticket-portal-int exec deployment/redmine -- \
+  bundle exec rails runner \
+  'puts User.where(login: %w[int-admin int-support int-sales]).pluck(:login, :status)'
+```
+
+Redmineのstatus `1`は有効です。ユーザーが存在しない場合、`deploy/env/int.env`のパスワードを確認してから`./scripts/helmfile-deploy.sh int sync`を再実行し、bootstrap Jobを実行します。
+
 ## 検証と保守
 
 ```bash
@@ -270,6 +307,8 @@ make helm-validate
 ```
 
 この検証は chart の lint、4 環境の render、および Compose/Helm が共有する Redmine bootstrap スクリプトの同期を確認します。`scripts/bootstrap_redmine.rb` を変更した場合は `deploy/chart/files/bootstrap_redmine.rb` に同じ変更を反映してください。
+
+さらに、環境ごとのTraefik導入有無とIngressClass、URL規則、テストユーザー名、stg/prdの固定済みobservabilityイメージタグを検証します。
 
 ## 導入時に確定する値
 

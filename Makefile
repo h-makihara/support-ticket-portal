@@ -14,6 +14,7 @@ help:
 	@echo "  make run      - Start backend server"
 	@echo "  make helm-template ENV=int - Render one Helmfile environment"
 	@echo "  make helm-validate - Validate the chart and all environments"
+	@echo "  ./scripts/helmfile-deploy.sh int info - Show URLs and test users"
 	@echo "  make clean    - Remove .venv and cache files"
 
 deps:
