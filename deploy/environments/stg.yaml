@@ -1,0 +1,11 @@
+images:
+  backend: {repository: support-ticket-portal/backend, tag: stg, pullPolicy: IfNotPresent}
+  frontend: {repository: support-ticket-portal/frontend, tag: stg, pullPolicy: IfNotPresent}
+app:
+  enableTestUsers: true
+  sessionCookieSecure: false
+  backendEnv: {DEPLOY_ENVIRONMENT: stg}
+  testUsers:
+    admin: {username: stg-admin, email: stg-admin@example.invalid}
+    support: {username: stg-support, email: stg-support@example.invalid}
+    sales: {username: stg-sales, email: stg-sales@example.invalid}

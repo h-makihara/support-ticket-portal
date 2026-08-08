@@ -1,0 +1,12 @@
+images:
+  backend: {repository: support-ticket-portal/backend, tag: prd, pullPolicy: IfNotPresent}
+  frontend: {repository: support-ticket-portal/frontend, tag: prd, pullPolicy: IfNotPresent}
+app:
+  replicas: 2
+  enableTestUsers: false
+  sessionCookieSecure: false
+  backendEnv: {DEPLOY_ENVIRONMENT: prd}
+  testUsers:
+    admin: {username: disabled, email: disabled@example.invalid}
+    support: {username: disabled, email: disabled@example.invalid}
+    sales: {username: disabled, email: disabled@example.invalid}

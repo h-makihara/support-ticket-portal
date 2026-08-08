@@ -1,0 +1,98 @@
+environment: int
+
+# URL = <namespace>-<environment>-<feature>.<domain>
+url:
+  namespace: support-ticket-portal
+  domain: localhost
+
+images:
+  backend:
+    repository: support-ticket-portal/backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: support-ticket-portal/frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  redmine:
+    repository: redmine
+    tag: "6.1"
+    pullPolicy: IfNotPresent
+  postgres:
+    repository: postgres
+    tag: "15"
+    pullPolicy: IfNotPresent
+  redis:
+    repository: redis
+    tag: "7.4-alpine"
+    pullPolicy: IfNotPresent
+  tempo:
+    repository: grafana/tempo
+    tag: latest
+    pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+app:
+  replicas: 1
+  redmineProjectId: "1"
+  redmineTrackerId: "4"
+  redmineProjectIdentifier: internal-inquiry
+  sessionCookieSecure: false
+  enableTestUsers: true
+  # Environment-specific backend variables. Values are rendered as strings.
+  backendEnv: {}
+  testUsers:
+    admin:
+      username: test-admin
+      email: test-admin@example.invalid
+    support:
+      username: test-support
+      email: test-support@example.invalid
+    sales:
+      username: test-sales
+      email: test-sales@example.invalid
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations: {}
+  # Empty uses the generated <namespace>-<environment>-portal.<domain> host.
+  host: ""
+  tls:
+    enabled: false
+    secretName: ""
+
+redmineIngress:
+  enabled: false
+  className: traefik
+  annotations: {}
+  # Empty uses the generated <namespace>-<environment>-redmine.<domain> host.
+  host: ""
+  tls:
+    enabled: false
+    secretName: ""
+
+persistence:
+  storageClass: ""
+  postgresSize: 8Gi
+  redmineFilesSize: 5Gi
+
+resources:
+  frontend: {}
+  backend: {}
+  redmine: {}
+  postgres: {}
+  redis: {}
+  tempo: {}
+
+observability:
+  tempoEnabled: true
+
+secrets:
+  redmineApiKey: ""
+  redmineSecretKeyBase: ""
+  postgresPassword: ""
+  testAdminPassword: ""
+  testSupportPassword: ""
+  testSalesPassword: ""

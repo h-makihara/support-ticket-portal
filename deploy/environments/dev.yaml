@@ -1,0 +1,11 @@
+images:
+  backend: {repository: support-ticket-portal/backend, tag: dev, pullPolicy: IfNotPresent}
+  frontend: {repository: support-ticket-portal/frontend, tag: dev, pullPolicy: IfNotPresent}
+app:
+  enableTestUsers: true
+  sessionCookieSecure: false
+  backendEnv: {DEPLOY_ENVIRONMENT: dev}
+  testUsers:
+    admin: {username: dev-admin, email: dev-admin@example.invalid}
+    support: {username: dev-support, email: dev-support@example.invalid}
+    sales: {username: dev-sales, email: dev-sales@example.invalid}

@@ -9,6 +9,7 @@
 ## セットアップ・運用
 
 - [セットアップガイド](setup.md) — 環境構築手順・クイックスタート
+- [Helmfile デプロイ](helmfile.md) — int/dev/stg/prd の Kubernetes 環境構築と E2E
 - [Redmine 設定](redmine.md) — プロジェクト・ステータス・API キーの設定方法
 
 ## テスト・その他

@@ -1,0 +1,35 @@
+helmDefaults:
+  wait: true
+  timeout: 600
+  atomic: true
+  createNamespace: true
+
+environments:
+  int:
+    values:
+      - deploy/environments/int.yaml
+  dev:
+    values:
+      - deploy/environments/dev.yaml
+  stg:
+    values:
+      - deploy/environments/stg.yaml
+  prd:
+    values:
+      - deploy/environments/prd.yaml
+
+---
+releases:
+  - name: support-ticket-portal-{{ .Environment.Name }}
+    namespace: support-ticket-portal-{{ .Environment.Name }}
+    chart: ./deploy/chart
+    values:
+      - deploy/environments/{{ .Environment.Name }}.yaml
+      - environment: {{ .Environment.Name | quote }}
+        secrets:
+          redmineApiKey: {{ requiredEnv "REDMINE_API_KEY" | quote }}
+          redmineSecretKeyBase: {{ requiredEnv "REDMINE_SECRET_KEY_BASE" | quote }}
+          postgresPassword: {{ requiredEnv "POSTGRES_PASSWORD" | quote }}
+          testAdminPassword: {{ env "TEST_ADMIN_PASSWORD" | quote }}
+          testSupportPassword: {{ env "TEST_SUPPORT_PASSWORD" | quote }}
+          testSalesPassword: {{ env "TEST_SALES_PASSWORD" | quote }}

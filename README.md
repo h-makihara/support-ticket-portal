@@ -71,6 +71,19 @@ make regression
 
 ブラウザーE2Eには Playwright、API結合テストには [runn](https://github.com/k1LoW/runn) を利用します。準備、観点別コマンド、フルリグレッションの適用基準は [テストガイド](docs/testing.md) を参照してください。
 
+## Kubernetes / Helmfile
+
+既存の Docker Compose に加えて、Helmfile で `int` / `dev` / `stg` / `prd` を切り替えて Kubernetes へデプロイできます。環境ごとに Namespace、環境変数、イメージタグ、`<namespace>-<env>-<feature>.<domain>` 形式の Traefik Ingress host が切り替わります。既定の Portal URL は `support-ticket-portal-int-portal.localhost` の形式です。int/dev/stg では環境専用テストユーザーによる E2E も実行できます。
+
+```bash
+cp deploy/env/int.env.example deploy/env/int.env
+# deploy/env/int.env のシークレットを設定
+./scripts/helmfile-deploy.sh int sync
+./scripts/helmfile-e2e.sh int
+```
+
+クラスタ前提、イメージ、DNS/TLS、StorageClass、運用上の確認事項は [Helmfile デプロイガイド](docs/helmfile.md) を参照してください。
+
 ## 設定
 
 主要な環境変数は次のとおりです。全項目は [.env.example](.env.example) を参照してください。
@@ -92,6 +105,7 @@ make regression
 - [アーキテクチャ](docs/architecture.md)
 - [Redmine 設定とワークフロー](docs/redmine.md)
 - [テストガイド](docs/testing.md)
+- [Helmfile デプロイガイド](docs/helmfile.md)
 - [MVP スコープ](docs/scope.md)
 - [変更履歴](docs/changelog.md)
 

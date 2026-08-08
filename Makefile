@@ -1,4 +1,4 @@
-.PHONY: help deps test test-frontend build-frontend e2e-install e2e-focused e2e-full regression lint run clean
+.PHONY: help deps test test-frontend build-frontend e2e-install e2e-focused e2e-full regression lint run clean helm-template helm-validate
 
 help:
 	@echo "Available commands:"
@@ -12,6 +12,8 @@ help:
 	@echo "  make regression - Run all automated regression tests"
 	@echo "  make lint     - Run linting (if configured)"
 	@echo "  make run      - Start backend server"
+	@echo "  make helm-template ENV=int - Render one Helmfile environment"
+	@echo "  make helm-validate - Validate the chart and all environments"
 	@echo "  make clean    - Remove .venv and cache files"
 
 deps:
@@ -39,6 +41,13 @@ regression: test test-frontend build-frontend e2e-full
 
 run:
 	uv run uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+
+helm-template:
+	@test -n "$(ENV)" || (echo "ENV=int|dev|stg|prd is required" && exit 2)
+	./scripts/helmfile-deploy.sh "$(ENV)" template
+
+helm-validate:
+	./scripts/validate-helm.sh
 
 clean:
 	rm -rf .venv __pycache__ .pytest_cache .coverage htmlcov/
