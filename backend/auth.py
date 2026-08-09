@@ -22,6 +22,7 @@ class SessionData:
     name: str
     redmine_api_key: str
     created_at: str
+    is_admin: bool = False
 
 
 class SessionStore:
@@ -86,4 +87,5 @@ async def authenticate_with_redmine(
         name=name,
         redmine_api_key=api_key,
         created_at=datetime.now(timezone.utc).isoformat(),
+        is_admin=bool(user.get("admin", False)),
     )

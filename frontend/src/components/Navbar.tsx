@@ -11,6 +11,7 @@ export const NAV_ITEMS: ReadonlyArray<{
   { to: '/', label: 'チケット一覧', capability: 'tickets:list' },
   { to: '/create', label: '新規作成', capability: 'tickets:create' },
   { to: '/answer', label: '回答者向け', capability: 'tickets:answer' },
+  { to: '/faqs', label: 'FAQ', capability: 'faqs:read' },
 ]
 
 export function Navbar({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {

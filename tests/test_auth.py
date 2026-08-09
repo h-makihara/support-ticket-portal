@@ -72,6 +72,18 @@ def test_login_delegates_to_redmine_and_sets_httponly_cookie(mock_redmine_api):
     app.dependency_overrides.clear()
 
 
+def test_admin_session_exposes_admin_role_without_project_membership(client: TestClient):
+    store = app.dependency_overrides[get_session_store]()
+    store.sessions["test-session"] = replace(
+        store.sessions["test-session"], redmine_user_id=42, is_admin=True
+    )
+
+    response = client.get("/auth/session")
+
+    assert response.status_code == 200
+    assert response.json()["user"]["roles"] == ["admin"]
+
+
 def test_login_rejects_invalid_credentials(mock_redmine_api):
     store = FakeSessionStore()
     app.dependency_overrides[get_session_store] = lambda: store

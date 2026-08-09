@@ -1,4 +1,4 @@
-.PHONY: help deps test test-frontend build-frontend e2e-install e2e-focused e2e-full regression lint run clean helm-template helm-validate
+.PHONY: help deps test test-frontend build-frontend e2e-install e2e-focused e2e-faq e2e-full regression lint run clean helm-template helm-validate
 
 help:
 	@echo "Available commands:"
@@ -8,6 +8,7 @@ help:
 	@echo "  make build-frontend - Type-check and build the frontend"
 	@echo "  make e2e-install - Install the E2E browser"
 	@echo "  make e2e-focused - Run focused browser E2E tests"
+	@echo "  make e2e-faq - Run FAQ browser E2E tests"
 	@echo "  make e2e-full - Run the full business-flow regression"
 	@echo "  make regression - Run all automated regression tests"
 	@echo "  make lint     - Run linting (if configured)"
@@ -34,6 +35,9 @@ e2e-install:
 
 e2e-focused:
 	cd frontend && npm run e2e
+
+e2e-faq:
+	cd frontend && npm run e2e:faq
 
 e2e-full:
 	cd frontend && npm run e2e:full

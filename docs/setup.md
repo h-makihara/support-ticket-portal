@@ -79,7 +79,7 @@ npm run build
 make e2e-install
 ```
 
-E2Eでは `.env` の `TEST_SALES_USERNAME/PASSWORD` と `TEST_SUPPORT_USERNAME/PASSWORD` を読み込みます。`E2E_SALES_USERNAME/PASSWORD`、`E2E_SUPPORT_USERNAME/PASSWORD` を実行環境へ設定すると、その値を優先します。検証ユーザーを作成するには `ENABLE_TEST_USERS=true` で Redmine 初期化を実行してください。
+E2Eでは `.env` の `TEST_SALES_USERNAME/PASSWORD`、`TEST_SUPPORT_USERNAME/PASSWORD`、`TEST_ADMIN_USERNAME/PASSWORD` を読み込みます。対応する `E2E_<ROLE>_USERNAME/PASSWORD` を実行環境へ設定すると、その値を優先します。検証ユーザーを作成するには `ENABLE_TEST_USERS=true` で Redmine 初期化を実行してください。
 
 ```bash
 # 機能観点ごとのE2E（フルシナリオを除く）

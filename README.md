@@ -11,6 +11,7 @@ Redmine をチケット基盤として利用する、社内問い合わせ向け
 - 回答者向けキューと「自分が対応する」操作
 - 回答者向けキューでの現在／前回対応者表示
 - コメントと項目変更をまとめた監査ログ
+- Redmine Wikiを利用したFAQの検索・表示と、サポート担当者／管理者向けCRUD
 - Redis を利用した6時間のサーバーサイドセッション
 - OpenTelemetry Collector sidecarとGrafana Alloy gatewayによるログ・トレース転送
 
@@ -64,6 +65,9 @@ npm run build
 
 # 観点別E2E（Docker Compose 一式の起動が必要）
 make e2e-focused
+
+# FAQの初期データ・権限・CRUDだけを確認
+make e2e-faq
 
 # 大きな変更時のフルリグレッション
 make regression

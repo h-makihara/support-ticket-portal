@@ -14,6 +14,7 @@
     "e2e:support": "playwright test e2e/support-response.spec.ts",
     "e2e:requirements": "playwright test e2e/requirements.spec.ts",
     "e2e:closure": "playwright test e2e/closure.spec.ts",
+    "e2e:faq": "playwright test e2e/faq.spec.ts",
     "e2e:full": "playwright test e2e/full-regression.spec.ts"
   },
   "dependencies": {

@@ -34,6 +34,12 @@ Ingressへ接続できない場合はFrontend Serviceへのport-forwardへ自動
 
 ## 観点別E2E
 
+FAQの初期データ、営業担当者の検索・表示、サポート担当者と管理者のCRUDを確認する場合は次を実行します。
+
+```bash
+make e2e-faq
+```
+
 | 変更観点 | 対象 | コマンド |
 |---|---|---|
 | チケット作成画面・作成API | 営業による新規作成 | `npm run e2e:creation --prefix frontend` |

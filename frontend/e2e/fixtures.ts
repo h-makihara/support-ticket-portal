@@ -7,9 +7,10 @@ loadRootEnv()
 type RolePageFixtures = {
   salesPage: Page
   supportPage: Page
+  adminPage: Page
 }
 
-function credentials(role: 'SALES' | 'SUPPORT') {
+function credentials(role: 'SALES' | 'SUPPORT' | 'ADMIN') {
   const username = process.env[`E2E_${role}_USERNAME`] || process.env[`TEST_${role}_USERNAME`]
   const password = process.env[`E2E_${role}_PASSWORD`] || process.env[`TEST_${role}_PASSWORD`]
   if (!username || !password) {
@@ -33,6 +34,13 @@ export const test = base.extend<RolePageFixtures>({
     const context = await browser.newContext({ baseURL })
     const page = await context.newPage()
     await login(page, credentials('SUPPORT'))
+    await use(page)
+    await context.close()
+  },
+  adminPage: async ({ browser, baseURL }, use) => {
+    const context = await browser.newContext({ baseURL })
+    const page = await context.newPage()
+    await login(page, credentials('ADMIN'))
     await use(page)
     await context.close()
   },

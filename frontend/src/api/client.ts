@@ -182,6 +182,46 @@ export async function getTicketPriorityOptions(): Promise<TicketPriorityOption[]
   return request<TicketPriorityOption[]>('/priority/options')
 }
 
+export interface Faq {
+  id: string
+  question: string
+  answer: string
+  version: number
+  author: string
+  created_on: string
+  updated_on: string
+}
+
+export interface FaqListResponse {
+  faqs: Faq[]
+  pagination: PaginationInfo
+}
+
+export function getFaqs(q = '', limit = 20, offset = 0): Promise<FaqListResponse> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (q.trim()) params.set('q', q.trim())
+  return request<FaqListResponse>(`/faqs?${params}`)
+}
+
+export function getFaq(id: string): Promise<Faq> {
+  return request<Faq>(`/faqs/${encodeURIComponent(id)}`)
+}
+
+export function createFaq(data: { question: string; answer: string }): Promise<Faq> {
+  return request<Faq>('/faqs', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export function updateFaq(id: string, data: { question: string; answer: string; version: number }): Promise<Faq> {
+  return request<Faq>(`/faqs/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteFaq(id: string): Promise<{ detail: string }> {
+  return request(`/faqs/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
 // ── Audit Log Types ────────────────────────────────────────────────
 
 export interface AuditChange {

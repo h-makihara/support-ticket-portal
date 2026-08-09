@@ -6,6 +6,9 @@ import { TicketDetail } from './pages/TicketDetail'
 import { TicketCreate } from './pages/TicketCreate'
 import { AnswerTicketList } from './pages/AnswerTicketList'
 import { Login } from './pages/Login'
+import { FaqList } from './pages/FaqList'
+import { FaqDetail } from './pages/FaqDetail'
+import { FaqForm } from './pages/FaqForm'
 import { AuthUser, getSession, logout } from './api/client'
 import { RequireCapability } from './components/RequireCapability'
 
@@ -46,6 +49,26 @@ function App() {
           <Route path="/answer" element={
             <RequireCapability user={user} capability="tickets:answer" redirectTo="/">
               <AnswerTicketList />
+            </RequireCapability>
+          } />
+          <Route path="/faqs" element={
+            <RequireCapability user={user} capability="faqs:read" redirectTo="/">
+              <FaqList user={user} />
+            </RequireCapability>
+          } />
+          <Route path="/faqs/new" element={
+            <RequireCapability user={user} capability="faqs:write" redirectTo="/faqs">
+              <FaqForm />
+            </RequireCapability>
+          } />
+          <Route path="/faqs/:id" element={
+            <RequireCapability user={user} capability="faqs:read" redirectTo="/">
+              <FaqDetail user={user} />
+            </RequireCapability>
+          } />
+          <Route path="/faqs/:id/edit" element={
+            <RequireCapability user={user} capability="faqs:write" redirectTo="/faqs">
+              <FaqForm />
             </RequireCapability>
           } />
         </Routes>

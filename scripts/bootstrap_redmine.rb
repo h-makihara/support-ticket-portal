@@ -58,8 +58,11 @@ tracker.default_status = statuses.fetch("対応待ち")
 tracker.save!
 
 role_permissions = {
-  "営業担当者" => [:view_issues, :add_issues, :edit_issues, :add_issue_notes],
-  "サポート担当者" => [:view_issues, :add_issues, :edit_issues, :add_issue_notes]
+  "営業担当者" => [:view_issues, :add_issues, :edit_issues, :add_issue_notes, :view_wiki_pages],
+  "サポート担当者" => [
+    :view_issues, :add_issues, :edit_issues, :add_issue_notes,
+    :view_wiki_pages, :edit_wiki_pages, :delete_wiki_pages
+  ]
 }
 roles = {}
 role_permissions.each do |name, permissions|
@@ -79,9 +82,35 @@ project = Project.find_or_initialize_by(identifier: project_identifier)
 project.name = ENV.fetch("REDMINE_PROJECT_NAME", "Internal Support")
 project.description = "Support ticket portal project"
 project.is_public = false
-project.enabled_module_names = (project.enabled_module_names + ["issue_tracking"]).uniq
+project.enabled_module_names = (project.enabled_module_names + ["issue_tracking", "wiki"]).uniq
 project.trackers = Tracker.all.to_a
 project.save!
+
+wiki = project.wiki || Wiki.new(project: project)
+wiki.start_page = "FAQ"
+wiki.save!
+
+sample_faqs = {
+  "FAQ_report_request" => [
+    "報告書が欲しいです",
+    "チケットを作成（既にやりとりするチケットがある場合は更新）し、報告書が必要にチェックを入れて対応情報を更新してください"
+  ],
+  "FAQ_customer_visit" => [
+    "報告書がわかりにくいので一緒に客先に同行してほしいです",
+    "チケットを作成（既にやりとりするチケットがある場合は更新）し、客先同行が必要にチェックを入れて対応情報を更新してください"
+  ]
+}
+sample_faqs.each do |title, (question, answer)|
+  next if wiki.find_page(title)
+
+  page = WikiPage.new(wiki: wiki, title: title)
+  content = WikiContent.new(
+    page: page,
+    author: admin,
+    text: "Q: #{question}\n\nA:\n#{answer}"
+  )
+  page.save_with_content(content) || abort("Failed to create sample FAQ #{title}: #{page.errors.full_messages.join(', ')}")
+end
 
 # Portal-specific issue fields. Boolean defaults are explicitly false so both
 # newly created and existing issues have a predictable value in the portal.

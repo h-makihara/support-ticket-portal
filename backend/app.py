@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel
@@ -149,6 +152,7 @@ _status_by_key: Dict[str, int] = {}
 
 ROLE_SALES = "sales"
 ROLE_SUPPORT = "support"
+ROLE_ADMIN = "admin"
 _ROLE_BY_REDMINE_NAME = {
     "営業担当者": ROLE_SALES,
     "サポート担当者": ROLE_SUPPORT,
@@ -168,6 +172,9 @@ PRIORITY_ESCALATION_FIELDS = frozenset(
 AUTHOR_REASSIGNMENT_FIELDS = frozenset(
     {"report_delivered", "schedule_assigned"}
 )
+
+FAQ_PAGE_PREFIX = "FAQ_"
+FAQ_TEXT_PATTERN = re.compile(r"\AQ: (?P<question>[^\r\n]+)\r?\n\r?\nA:\r?\n(?P<answer>[\s\S]*)\Z")
 
 # Mapping: English filter key (used by frontend) → set of Redmine slug/name matches.
 # This is filled dynamically at startup by querying /issue_statuses.json.
@@ -650,10 +657,13 @@ async def _user_roles(user_id: int) -> set[str]:
 
 async def _session_user(session: SessionData) -> Dict[str, Any]:
     """Build the public session user payload without exposing credentials."""
-    try:
-        roles = await _user_roles(session.redmine_user_id)
-    except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
-        roles = set()
+    if session.is_admin:
+        roles = {ROLE_ADMIN}
+    else:
+        try:
+            roles = await _user_roles(session.redmine_user_id)
+        except (httpx.HTTPError, RuntimeError, ValueError, KeyError):
+            roles = set()
     return {
         "id": session.redmine_user_id,
         "username": session.username,
@@ -671,6 +681,26 @@ async def _required_user_roles(user_id: int) -> set[str]:
             status_code=503,
             detail="ユーザーのロールを確認できませんでした",
         ) from None
+
+
+async def _faq_roles(session: SessionData) -> set[str]:
+    if session.is_admin:
+        return {ROLE_ADMIN}
+    return await _required_user_roles(session.redmine_user_id)
+
+
+async def _require_faq_read(session: SessionData) -> set[str]:
+    roles = await _faq_roles(session)
+    if not roles.intersection({ROLE_SALES, ROLE_SUPPORT, ROLE_ADMIN}):
+        raise HTTPException(status_code=403, detail="FAQの閲覧権限がありません")
+    return roles
+
+
+async def _require_faq_write(session: SessionData) -> set[str]:
+    roles = await _faq_roles(session)
+    if not roles.intersection({ROLE_SUPPORT, ROLE_ADMIN}):
+        raise HTTPException(status_code=403, detail="FAQの編集権限がありません")
+    return roles
 
 
 async def _require_support_role(user_id: int) -> None:
@@ -763,6 +793,63 @@ def _custom_field_audit_metadata(
     }
 
 
+def _faq_text(question: str, answer: str) -> str:
+    return f"Q: {question}\n\nA:\n{answer}"
+
+
+def _parse_faq_page(page: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    title = str(page.get("title", ""))
+    if not title.startswith(FAQ_PAGE_PREFIX):
+        return None
+    match = FAQ_TEXT_PATTERN.match(str(page.get("text", "")))
+    if match is None:
+        logger.warning("Ignoring malformed FAQ wiki page %s", title)
+        return None
+    author = page.get("author")
+    return {
+        "id": title.removeprefix(FAQ_PAGE_PREFIX),
+        "question": match.group("question").strip(),
+        "answer": match.group("answer").strip(),
+        "version": int(page.get("version", 1)),
+        "author": author.get("name", "") if isinstance(author, dict) else "",
+        "created_on": page.get("created_on", ""),
+        "updated_on": page.get("updated_on", ""),
+    }
+
+
+def _faq_page_title(faq_id: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", faq_id):
+        raise HTTPException(status_code=404, detail="FAQが見つかりません")
+    return f"{FAQ_PAGE_PREFIX}{faq_id}"
+
+
+def _faq_page_path(title: str) -> str:
+    return f"/projects/{quote(REDMINE_PROJECT_ID, safe='')}/wiki/{quote(title, safe='')}.json"
+
+
+def _validated_faq_fields(question: str, answer: str) -> tuple[str, str]:
+    normalized_question = question.strip()
+    normalized_answer = answer.strip()
+    if not normalized_question or not normalized_answer:
+        raise HTTPException(status_code=422, detail="質問と回答は必須です")
+    if "\n" in normalized_question or "\r" in normalized_question:
+        raise HTTPException(status_code=422, detail="質問に改行は使用できません")
+    if len(normalized_question) > 200:
+        raise HTTPException(status_code=422, detail="質問は200文字以内で入力してください")
+    return normalized_question, normalized_answer
+
+
+async def _redmine_faq_page(
+    client: httpx.AsyncClient, title: str
+) -> Optional[Dict[str, Any]]:
+    response = await client.get(_faq_page_path(title))
+    if response.status_code == 404:
+        return None
+    if response.status_code != 200:
+        raise HTTPException(status_code=503, detail="FAQを取得できませんでした")
+    return response.json().get("wiki_page")
+
+
 # ── Endpoints ───────────────────────────────────────────────────────
 
 class CreateTicketRequest(BaseModel):
@@ -789,6 +876,147 @@ class UpdateCustomFieldsRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class FaqWriteRequest(BaseModel):
+    question: str
+    answer: str
+    version: Optional[int] = None
+
+
+@app.get("/faqs")
+async def list_faqs(
+    q: str = "",
+    limit: int = 20,
+    offset: int = 0,
+    session: SessionData = Depends(require_session),
+):
+    await _require_faq_read(session)
+    if limit < 1 or limit > 100 or offset < 0:
+        raise HTTPException(status_code=422, detail="ページネーション指定が不正です")
+
+    async with _client(session.redmine_api_key) as client:
+        response = await client.get(
+            f"/projects/{quote(REDMINE_PROJECT_ID, safe='')}/wiki/index.json"
+        )
+        if response.status_code != 200:
+            raise HTTPException(status_code=503, detail="FAQ一覧を取得できませんでした")
+        titles = [
+            str(page.get("title", ""))
+            for page in response.json().get("wiki_pages", [])
+            if str(page.get("title", "")).startswith(FAQ_PAGE_PREFIX)
+        ]
+        pages = await asyncio.gather(
+            *(_redmine_faq_page(client, title) for title in titles)
+        )
+
+    faqs = [faq for page in pages if page and (faq := _parse_faq_page(page))]
+    query = q.strip().casefold()
+    if query:
+        faqs = [
+            faq
+            for faq in faqs
+            if query in faq["question"].casefold() or query in faq["answer"].casefold()
+        ]
+    faqs.sort(key=lambda faq: (faq["updated_on"], faq["question"]), reverse=True)
+    total_count = len(faqs)
+    items = faqs[offset : offset + limit]
+    return {
+        "faqs": items,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total_count": total_count,
+            "has_more": offset + len(items) < total_count,
+        },
+    }
+
+
+@app.post("/faqs", status_code=201)
+async def create_faq(
+    faq_data: FaqWriteRequest,
+    session: SessionData = Depends(require_session),
+):
+    await _require_faq_write(session)
+    question, answer = _validated_faq_fields(faq_data.question, faq_data.answer)
+    title = f"{FAQ_PAGE_PREFIX}{uuid.uuid4().hex}"
+    async with _client(session.redmine_api_key) as client:
+        response = await client.put(
+            _faq_page_path(title),
+            json={"wiki_page": {"text": _faq_text(question, answer)}},
+        )
+        if response.status_code not in (201, 204):
+            return JSONResponse(status_code=response.status_code, content={"detail": response.text})
+        page = await _redmine_faq_page(client, title)
+    if page is None or (faq := _parse_faq_page(page)) is None:
+        raise HTTPException(status_code=503, detail="作成したFAQを取得できませんでした")
+    logger.info("Created FAQ %s", faq["id"])
+    return faq
+
+
+@app.get("/faqs/{faq_id}")
+async def get_faq(
+    faq_id: str,
+    session: SessionData = Depends(require_session),
+):
+    await _require_faq_read(session)
+    title = _faq_page_title(faq_id)
+    async with _client(session.redmine_api_key) as client:
+        page = await _redmine_faq_page(client, title)
+    if page is None or (faq := _parse_faq_page(page)) is None:
+        raise HTTPException(status_code=404, detail="FAQが見つかりません")
+    return faq
+
+
+@app.put("/faqs/{faq_id}")
+async def update_faq(
+    faq_id: str,
+    faq_data: FaqWriteRequest,
+    session: SessionData = Depends(require_session),
+):
+    await _require_faq_write(session)
+    question, answer = _validated_faq_fields(faq_data.question, faq_data.answer)
+    if faq_data.version is None or faq_data.version < 1:
+        raise HTTPException(status_code=422, detail="FAQのバージョンが必要です")
+    title = _faq_page_title(faq_id)
+    async with _client(session.redmine_api_key) as client:
+        response = await client.put(
+            _faq_page_path(title),
+            json={
+                "wiki_page": {
+                    "text": _faq_text(question, answer),
+                    "version": faq_data.version,
+                }
+            },
+        )
+        if response.status_code == 404:
+            raise HTTPException(status_code=404, detail="FAQが見つかりません")
+        if response.status_code == 409:
+            raise HTTPException(status_code=409, detail="FAQが他のユーザーに更新されています")
+        if response.status_code != 204:
+            return JSONResponse(status_code=response.status_code, content={"detail": response.text})
+        page = await _redmine_faq_page(client, title)
+    if page is None or (faq := _parse_faq_page(page)) is None:
+        raise HTTPException(status_code=503, detail="更新したFAQを取得できませんでした")
+    logger.info("Updated FAQ %s", faq_id)
+    return faq
+
+
+@app.delete("/faqs/{faq_id}")
+async def delete_faq(
+    faq_id: str,
+    session: SessionData = Depends(require_session),
+):
+    await _require_faq_write(session)
+    title = _faq_page_title(faq_id)
+    async with _client(session.redmine_api_key) as client:
+        response = await client.delete(_faq_page_path(title))
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail="FAQが見つかりません")
+    if response.status_code != 204:
+        return JSONResponse(status_code=response.status_code, content={"detail": response.text})
+    logger.info("Deleted FAQ %s", faq_id)
+    return {"detail": "FAQを削除しました"}
 
 
 @app.get("/priority/options")

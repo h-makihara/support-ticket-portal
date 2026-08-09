@@ -30,6 +30,7 @@ describe('Navbar authorization', () => {
     expect(screen.getByRole('link', { name: 'チケット一覧' })).toBeVisible()
     expect(screen.getByRole('link', { name: '新規作成' })).toBeVisible()
     expect(screen.queryByRole('link', { name: '回答者向け' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'FAQ' })).toBeVisible()
   })
 
   it('shows all current features to support users', () => {
@@ -38,5 +39,13 @@ describe('Navbar authorization', () => {
     expect(screen.getByRole('link', { name: 'チケット一覧' })).toBeVisible()
     expect(screen.getByRole('link', { name: '新規作成' })).toBeVisible()
     expect(screen.getByRole('link', { name: '回答者向け' })).toBeVisible()
+    expect(screen.getByRole('link', { name: 'FAQ' })).toBeVisible()
+  })
+
+  it('shows only FAQ navigation to administrators', () => {
+    renderNavbar(['admin'])
+
+    expect(screen.getByRole('link', { name: 'FAQ' })).toBeVisible()
+    expect(screen.queryByRole('link', { name: 'チケット一覧' })).not.toBeInTheDocument()
   })
 })
