@@ -61,6 +61,8 @@ Docker Composeによるローカル実行に加え、Helmfileでint/dev/stg/prd�
 
 Kubernetesでは環境ごとに`support-ticket-portal-<env>` Namespaceを使用します。PortalとRedmineのホスト名は`<namespace-prefix>-<env>-<feature>.<domain>`から生成します。Traefikは環境別設定により、環境専用ControllerをHelmfileで同時管理する方式と、既存Controllerを利用する方式を切り替えられます。
 
+PortalとRedmineのIngressは常時作成します。通常業務はPortalを利用し、Redmineの直接操作が必要な管理作業では環境別Redmine URLを利用します。
+
 int/dev/stgのテストユーザー名はHelmfile環境名から`<env>-admin`、`<env>-support`、`<env>-sales`として生成します。パスワードだけをGit管理外の環境別secretファイルからKubernetes Secretへ渡します。prdではテストユーザーを無効化します。
 
 OpenTelemetry設定は実行方式ごとに分離しています。Docker Composeは `deploy/docker/otel-collector.yaml` と `deploy/docker/alloy.alloy` を参照し、Kubernetesは `deploy/chart/templates/observability.yaml` が生成するConfigMapを参照します。

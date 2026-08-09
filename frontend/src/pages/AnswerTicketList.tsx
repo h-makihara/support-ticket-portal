@@ -4,6 +4,29 @@ import { claimTicket, getTickets, Ticket, TicketListResponse } from '../api/clie
 import { priorityBadgeClass, priorityLabel } from '../priority'
 
 const PAGE_SIZE = 20
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
+
+export function isUpdatedAtLeastOneDayAgo(
+  updatedOn: string | undefined,
+  now: number = Date.now(),
+): boolean {
+  if (!updatedOn) return false
+  const updatedAt = new Date(updatedOn).getTime()
+  return Number.isFinite(updatedAt) && now - updatedAt >= ONE_DAY_MS
+}
+
+export function formatUpdatedOn(updatedOn: string | undefined): string {
+  if (!updatedOn) return '-'
+  const date = new Date(updatedOn)
+  if (!Number.isFinite(date.getTime())) return '-'
+  return date.toLocaleString('ja-JP', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 export function AnswerTicketList() {
   const navigate = useNavigate()
@@ -99,6 +122,7 @@ export function AnswerTicketList() {
                 <th>対応者</th>
                 <th>前回対応者</th>
                 <th>作成日</th>
+                <th>最終更新日</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -118,6 +142,9 @@ export function AnswerTicketList() {
                   <td>{ticket.assignee?.name || '未割り当て'}</td>
                   <td>{ticket.latest_support_responder?.name || '—'}</td>
                   <td>{ticket.created_on ? new Date(ticket.created_on).toLocaleDateString() : '-'}</td>
+                  <td className={isUpdatedAtLeastOneDayAgo(ticket.updated_on) ? 'ticket-updated-overdue' : undefined}>
+                    {formatUpdatedOn(ticket.updated_on)}
+                  </td>
                   <td>
                     <button
                       className="btn btn-primary"

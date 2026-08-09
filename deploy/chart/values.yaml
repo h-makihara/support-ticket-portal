@@ -61,7 +61,6 @@ ingress:
     secretName: ""
 
 redmineIngress:
-  enabled: false
   className: traefik
   annotations: {}
   # Empty uses the generated <namespace>-<environment>-redmine.<domain> host.

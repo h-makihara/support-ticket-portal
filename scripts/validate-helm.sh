@@ -57,6 +57,7 @@ for environment in int dev stg prd; do
   fi
   assert_contains "$rendered" "ingressClassName: $expected_ingress_class" "$environment must use IngressClass $expected_ingress_class"
   assert_contains "$rendered" "host: \"${PORTAL_URL#*://}\"" "$environment Portal URL must match the shared script convention"
+  assert_contains "$rendered" "host: \"${PORTAL_REDMINE_URL#*://}\"" "$environment Redmine URL must match the shared script convention"
 
   assert_contains "$rendered" "value: \"$test_users_enabled\"" "$environment must render its test-user enablement"
   if [[ "$test_users_enabled" == "true" ]]; then

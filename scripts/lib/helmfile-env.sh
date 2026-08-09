@@ -156,7 +156,7 @@ portal_print_info() {
   echo "Environment : $PORTAL_ENVIRONMENT"
   echo "Namespace   : $PORTAL_NAMESPACE"
   echo "Portal URL  : $PORTAL_URL"
-  echo "Redmine URL : $PORTAL_REDMINE_URL (requires redmineIngress.enabled=true)"
+  echo "Redmine URL : $PORTAL_REDMINE_URL"
   if [[ "$traefik_install" == "true" ]]; then
     echo "Traefik     : bundled ($bundled_class)"
   else

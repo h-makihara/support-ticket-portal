@@ -4,7 +4,7 @@ Docker Compose は従来どおりローカル開発に利用できます。Kuber
 
 ## 構成と環境切替
 
-| 環境 | Namespace | Portal host | Redmine host（既定は非公開） | テストユーザー |
+| 環境 | Namespace | Portal host | Redmine host | テストユーザー |
 |---|---|---|---|---|
 | int | `support-ticket-portal-int` | `support-ticket-portal-int-portal.localhost` | `support-ticket-portal-int-redmine.localhost` | 有効 |
 | dev | `support-ticket-portal-dev` | `support-ticket-portal-dev-portal.localhost` | `support-ticket-portal-dev-redmine.localhost` | 有効 |
@@ -246,7 +246,7 @@ url:
 
 例えば `url.namespace: namespace` の場合、int の Redmine URL は `namespace-int-redmine.localhost` になります。
 
-Redmine の host は常に同じ規則で計算されますが、管理画面の外部公開を避けるため `redmineIngress.enabled` の既定値は `false` です。必要な環境だけ `true` にしてください。
+Redmine Ingressはすべての環境で常時作成されます。Redmineの手動操作が必要な場合は、表に記載した`<namespace>-<environment>-redmine.<domain>`形式のURLへアクセスします。公開範囲を制限する場合は、Traefik Middleware、ネットワーク境界、認証プロキシなどクラスタ側のアクセス制御を設定してください。
 
 組み込みTraefikを使う場合、IngressClassは環境別`traefik.bundledIngressClass`からPortalとRedmineのIngressへ自動設定されます。既存Controllerを使う場合は`traefik.externalIngressClass`が設定されます。
 
