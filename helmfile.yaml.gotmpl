@@ -70,6 +70,8 @@ releases:
           className: {{ if .Values.traefik.install }}{{ .Values.traefik.bundledIngressClass | quote }}{{ else }}{{ .Values.traefik.externalIngressClass | quote }}{{ end }}
         redmineIngress:
           className: {{ if .Values.traefik.install }}{{ .Values.traefik.bundledIngressClass | quote }}{{ else }}{{ .Values.traefik.externalIngressClass | quote }}{{ end }}
+        backendIngress:
+          className: {{ if .Values.traefik.install }}{{ .Values.traefik.bundledIngressClass | quote }}{{ else }}{{ .Values.traefik.externalIngressClass | quote }}{{ end }}
         secrets:
           redmineApiKey: {{ requiredEnv "REDMINE_API_KEY" | quote }}
           redmineSecretKeyBase: {{ requiredEnv "REDMINE_SECRET_KEY_BASE" | quote }}

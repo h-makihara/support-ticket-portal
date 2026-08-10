@@ -4,12 +4,12 @@ Docker Compose は従来どおりローカル開発に利用できます。Kuber
 
 ## 構成と環境切替
 
-| 環境 | Namespace | Portal host | Redmine host | テストユーザー |
-|---|---|---|---|---|
-| int | `support-ticket-portal-int` | `support-ticket-portal-int-portal.localhost` | `support-ticket-portal-int-redmine.localhost` | 有効 |
-| dev | `support-ticket-portal-dev` | `support-ticket-portal-dev-portal.localhost` | `support-ticket-portal-dev-redmine.localhost` | 有効 |
-| stg | `support-ticket-portal-stg` | `support-ticket-portal-stg-portal.localhost` | `support-ticket-portal-stg-redmine.localhost` | 有効 |
-| prd | `support-ticket-portal-prd` | `support-ticket-portal-prd-portal.localhost` | `support-ticket-portal-prd-redmine.localhost` | 無効 |
+| 環境 | Namespace | Portal host | Redmine host | Backend host | テストユーザー |
+|---|---|---|---|---|---|
+| int | `support-ticket-portal-int` | `support-ticket-portal-int-portal.localhost` | `support-ticket-portal-int-redmine.localhost` | `support-ticket-portal-int-backend.localhost` | 有効 |
+| dev | `support-ticket-portal-dev` | `support-ticket-portal-dev-portal.localhost` | `support-ticket-portal-dev-redmine.localhost` | `support-ticket-portal-dev-backend.localhost` | 有効 |
+| stg | `support-ticket-portal-stg` | `support-ticket-portal-stg-portal.localhost` | `support-ticket-portal-stg-redmine.localhost` | 非公開 | 有効 |
+| prd | `support-ticket-portal-prd` | `support-ticket-portal-prd-portal.localhost` | `support-ticket-portal-prd-redmine.localhost` | 非公開 | 無効 |
 
 ホスト名は `<namespace>-<environment>-<feature>.<domain>` の規則で生成します。既定値では namespace が `support-ticket-portal`、environment が `int` など、feature が `portal` または `redmine` です。環境固有値は `deploy/environments/<env>.yaml`、シークレットは Git 管理外の `deploy/env/<env>.env` に分離されています。Backend 固有の環境変数は各 values の `app.backendEnv` に追加でき、既定で `DEPLOY_ENVIRONMENT` が環境名へ切り替わります。
 
@@ -19,7 +19,7 @@ Docker Compose は従来どおりローカル開発に利用できます。Kuber
 ./scripts/helmfile-deploy.sh int info
 ```
 
-このコマンドはNamespace、Portal/Redmine URL、Traefik方式、valuesとsecretファイルの場所、テストユーザー名と対応するパスワード変数名を表示します。
+このコマンドはNamespace、Portal/Redmine URL、int/devで有効なBackend・Swagger UI・ReDoc URL、Traefik方式、valuesとsecretファイルの場所、テストユーザー名と対応するパスワード変数名を表示します。
 
 Chart は Frontend、Backend（OpenTelemetry Collector sidecar）、Grafana Alloy gateway、Redmine、PostgreSQL、Redis、Traefik Ingress と、Redmine のプロジェクト・ロール・ワークフロー・テストユーザーを作る冪等な bootstrap Job を含みます。
 
@@ -242,15 +242,17 @@ url:
   domain: localhost
 ```
 
-この設定から `support-ticket-portal-int-portal.localhost` と `support-ticket-portal-int-redmine.localhost` が生成されます。共有クラスタでは `url.domain` を実際の wildcard DNS 配下（例: `apps.example.com`）へ変更し、`*.apps.example.com` を Traefik の LoadBalancer IP/CNAME に向けます。特定機能だけ例外にする場合は `ingress.host` または `redmineIngress.host` を明示します。Traefik は HTTP routing を行いますが、DNS レコード自体は作りません。
+この設定から `support-ticket-portal-int-portal.localhost`、`support-ticket-portal-int-redmine.localhost`、int/devでは`support-ticket-portal-int-backend.localhost`形式のホストが生成されます。共有クラスタでは `url.domain` を実際の wildcard DNS 配下（例: `apps.example.com`）へ変更し、`*.apps.example.com` を Traefik の LoadBalancer IP/CNAME に向けます。特定機能だけ例外にする場合は `ingress.host`、`redmineIngress.host`、`backendIngress.host`を明示します。Traefik は HTTP routing を行いますが、DNS レコード自体は作りません。
 
 例えば `url.namespace: namespace` の場合、int の Redmine URL は `namespace-int-redmine.localhost` になります。
 
 Redmine Ingressはすべての環境で常時作成されます。Redmineの手動操作が必要な場合は、表に記載した`<namespace>-<environment>-redmine.<domain>`形式のURLへアクセスします。公開範囲を制限する場合は、Traefik Middleware、ネットワーク境界、認証プロキシなどクラスタ側のアクセス制御を設定してください。
 
+Backend Ingressはint/devだけで作成されます。Swagger UIは`<Backend URL>/docs`、ReDocは`<Backend URL>/redoc`です。「Try it out」を含むAPI検証に対応するためBackend Service全体を同一ホストへルーティングします。stg/prdではIngress自体を生成しません。共有環境では必要に応じてIngress annotationやネットワーク境界でアクセス元を制限してください。
+
 組み込みTraefikを使う場合、IngressClassは環境別`traefik.bundledIngressClass`からPortalとRedmineのIngressへ自動設定されます。既存Controllerを使う場合は`traefik.externalIngressClass`が設定されます。
 
-TLS を有効化する場合は `ingress.tls.enabled: true` と既存 TLS Secret 名を設定し、`app.sessionCookieSecure: true` にします。cert-manager を使う場合は `ingress.annotations` に issuer annotation を追加します。
+TLS を有効化する場合は対象の`ingress.tls.enabled`、`redmineIngress.tls.enabled`、または`backendIngress.tls.enabled`を有効にして既存TLS Secret名を設定します。PortalをHTTPSにする場合は`app.sessionCookieSecure: true`にします。cert-managerを使う場合は各Ingressの`annotations`にissuer annotationを追加します。
 
 ## E2E
 

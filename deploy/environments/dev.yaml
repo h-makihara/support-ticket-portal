@@ -4,6 +4,9 @@ traefik:
   externalIngressClass: traefik
   serviceType: LoadBalancer
 
+backendIngress:
+  enabled: true
+
 images:
   backend: {repository: support-ticket-portal/backend, tag: dev, pullPolicy: Always}
   frontend: {repository: support-ticket-portal/frontend, tag: dev, pullPolicy: Always}

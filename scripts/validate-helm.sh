@@ -58,6 +58,17 @@ for environment in int dev stg prd; do
   assert_contains "$rendered" "ingressClassName: $expected_ingress_class" "$environment must use IngressClass $expected_ingress_class"
   assert_contains "$rendered" "host: \"${PORTAL_URL#*://}\"" "$environment Portal URL must match the shared script convention"
   assert_contains "$rendered" "host: \"${PORTAL_REDMINE_URL#*://}\"" "$environment Redmine URL must match the shared script convention"
+  if [[ "$environment" == "int" || "$environment" == "dev" ]]; then
+    [[ -n "$PORTAL_BACKEND_URL" ]] || { echo "$environment must expose a Backend URL" >&2; exit 1; }
+    assert_contains "$rendered" "host: \"${PORTAL_BACKEND_URL#*://}\"" "$environment Backend URL must match the shared script convention"
+  else
+    [[ -z "$PORTAL_BACKEND_URL" ]] || { echo "$environment must not expose a Backend URL" >&2; exit 1; }
+    backend_host="$PORTAL_URL_NAMESPACE-$environment-backend.$PORTAL_URL_DOMAIN"
+    if grep -Fq "host: \"$backend_host\"" <<<"$rendered"; then
+      echo "$environment must not render the Backend Ingress" >&2
+      exit 1
+    fi
+  fi
 
   assert_contains "$rendered" "value: \"$test_users_enabled\"" "$environment must render its test-user enablement"
   if [[ "$test_users_enabled" == "true" ]]; then

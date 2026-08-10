@@ -65,7 +65,7 @@ portal_select_environment() {
   PORTAL_CHART_VALUES_FILE="$PORTAL_ROOT_DIR/deploy/chart/values.yaml"
   PORTAL_ENV_FILE="$PORTAL_ROOT_DIR/deploy/env/$environment.env"
 
-  local url_namespace url_domain portal_host redmine_host portal_tls redmine_tls
+  local url_namespace url_domain portal_host redmine_host backend_host portal_tls redmine_tls backend_tls backend_enabled
   url_namespace="$(portal_environment_value url namespace)"
   url_domain="$(portal_environment_value url domain)"
   [[ -n "$url_namespace" ]] || url_namespace="$(portal_chart_value url namespace)"
@@ -75,17 +75,28 @@ portal_select_environment() {
 
   portal_host="$(portal_yaml_scalar "$(portal_environment_value ingress host)")"
   redmine_host="$(portal_yaml_scalar "$(portal_environment_value redmineIngress host)")"
+  backend_host="$(portal_yaml_scalar "$(portal_environment_value backendIngress host)")"
   [[ -n "$portal_host" ]] || portal_host="$(portal_yaml_scalar "$(portal_chart_value ingress host)")"
   [[ -n "$redmine_host" ]] || redmine_host="$(portal_yaml_scalar "$(portal_chart_value redmineIngress host)")"
+  [[ -n "$backend_host" ]] || backend_host="$(portal_yaml_scalar "$(portal_chart_value backendIngress host)")"
   [[ -n "$portal_host" ]] || portal_host="$PORTAL_URL_NAMESPACE-$environment-portal.$PORTAL_URL_DOMAIN"
   [[ -n "$redmine_host" ]] || redmine_host="$PORTAL_URL_NAMESPACE-$environment-redmine.$PORTAL_URL_DOMAIN"
+  [[ -n "$backend_host" ]] || backend_host="$PORTAL_URL_NAMESPACE-$environment-backend.$PORTAL_URL_DOMAIN"
 
   portal_tls="$(portal_nested_environment_value ingress tls enabled)"
   redmine_tls="$(portal_nested_environment_value redmineIngress tls enabled)"
+  backend_tls="$(portal_nested_environment_value backendIngress tls enabled)"
   [[ -n "$portal_tls" ]] || portal_tls="$(portal_chart_nested_value ingress tls enabled)"
   [[ -n "$redmine_tls" ]] || redmine_tls="$(portal_chart_nested_value redmineIngress tls enabled)"
+  [[ -n "$backend_tls" ]] || backend_tls="$(portal_chart_nested_value backendIngress tls enabled)"
+  backend_enabled="$(portal_environment_value backendIngress enabled)"
+  [[ -n "$backend_enabled" ]] || backend_enabled="$(portal_chart_value backendIngress enabled)"
   PORTAL_URL="$(if [[ "$portal_tls" == "true" ]]; then printf https; else printf http; fi)://$portal_host"
   PORTAL_REDMINE_URL="$(if [[ "$redmine_tls" == "true" ]]; then printf https; else printf http; fi)://$redmine_host"
+  PORTAL_BACKEND_URL=""
+  if [[ "$backend_enabled" == "true" ]]; then
+    PORTAL_BACKEND_URL="$(if [[ "$backend_tls" == "true" ]]; then printf https; else printf http; fi)://$backend_host"
+  fi
   PORTAL_TEST_ADMIN_USERNAME="$environment-admin"
   PORTAL_TEST_SUPPORT_USERNAME="$environment-support"
   PORTAL_TEST_SALES_USERNAME="$environment-sales"
@@ -157,6 +168,13 @@ portal_print_info() {
   echo "Namespace   : $PORTAL_NAMESPACE"
   echo "Portal URL  : $PORTAL_URL"
   echo "Redmine URL : $PORTAL_REDMINE_URL"
+  if [[ -n "$PORTAL_BACKEND_URL" ]]; then
+    echo "Backend URL : $PORTAL_BACKEND_URL"
+    echo "Swagger UI  : $PORTAL_BACKEND_URL/docs"
+    echo "ReDoc       : $PORTAL_BACKEND_URL/redoc"
+  else
+    echo "Backend URL : disabled"
+  fi
   if [[ "$traefik_install" == "true" ]]; then
     echo "Traefik     : bundled ($bundled_class)"
   else

@@ -27,6 +27,35 @@ spec:
                 port: {name: http}
 {{- end }}
 ---
+{{- if .Values.backendIngress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: backend
+  labels:
+    {{- include "portal.labels" . | nindent 4 }}
+  {{- with .Values.backendIngress.annotations }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.backendIngress.className }}
+  {{- if .Values.backendIngress.tls.enabled }}
+  tls:
+    - hosts: [{{ include "portal.backendHost" . | quote }}]
+      secretName: {{ required "backendIngress.tls.secretName is required when TLS is enabled" .Values.backendIngress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ include "portal.backendHost" . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port: {name: http}
+{{- end }}
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

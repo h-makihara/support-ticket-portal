@@ -4,6 +4,7 @@
 
 ### Changed
 
+- int/devに限定したBackend Ingressを追加し、環境別URLからSwagger UIとReDocへアクセス可能に変更
 - Redmine Wikiを保存元とするFAQ一覧・検索・詳細・作成・編集・削除、ロール別認可、初期FAQ、Playwright E2Eを追加
 - Helmfileの環境情報・URL・テストユーザー規則を共通スクリプトへ集約し、`helmfile-deploy.sh <env> info`でシークレットを表示せず確認可能に変更
 - Helmのテストユーザー設定を環境名ベースの`<env>-admin/support/sales`へ統一し、環境valuesとE2E間の重複定義を削除

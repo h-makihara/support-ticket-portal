@@ -69,6 +69,16 @@ redmineIngress:
     enabled: false
     secretName: ""
 
+backendIngress:
+  enabled: false
+  className: traefik
+  annotations: {}
+  # Empty uses the generated <namespace>-<environment>-backend.<domain> host.
+  host: ""
+  tls:
+    enabled: false
+    secretName: ""
+
 persistence:
   storageClass: ""
   postgresSize: 8Gi
