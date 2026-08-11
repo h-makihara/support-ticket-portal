@@ -110,6 +110,8 @@ cp deploy/env/int.env.example deploy/env/int.env
 
 ## ドキュメント
 
+- [ドキュメント索引](docs/index.md)
+- [Backend API 仕様（INPUT / OUTPUT）](docs/api.md)
 - [セットアップガイド](docs/setup.md)
 - [アーキテクチャ](docs/architecture.md)
 - [Redmine 設定とワークフロー](docs/redmine.md)

@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 import httpx
-from pydantic import BaseModel
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -29,6 +28,41 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from backend.auth import SessionData, SessionStore, authenticate_with_redmine
+from backend.application.schemas import (
+    AddCommentInput,
+    AuthSessionOutput,
+    CreateTicketInput,
+    DetailOutput,
+    FaqListOutput,
+    FaqOutput,
+    FaqWriteInput,
+    HealthOutput,
+    LoginInput,
+    OptionOutput,
+    PriorityOptionOutput,
+    TicketListOutput,
+    TicketOutput,
+    UpdateCustomFieldsInput,
+    UpdatePriorityInput,
+    UpdateStatusInput,
+)
+from backend.application.ports import SessionRepository
+from backend.application.presenters.ticket import ticket_to_output
+from backend.domain.services.ticket_policy import (
+    AUTHOR_REASSIGNMENT_FIELDS,
+    PRIORITY_ESCALATION_FIELDS,
+    ROLE_ADMIN,
+    ROLE_SALES,
+    ROLE_SUPPORT,
+    UnknownPriorityError,
+    next_priority_id,
+)
+from backend.infrastructure.redmine.mappers import (
+    issue_custom_fields,
+    issue_to_ticket,
+    redmine_bool,
+)
+from backend.presentation.api.errors import internal_server_error
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +132,22 @@ tracer = trace.get_tracer("ticket-portal")
 
 # ── App ─────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Redmine Ticket Portal API", lifespan=lifespan)
+app = FastAPI(
+    title="Redmine Ticket Portal API",
+    version="0.4.0",
+    description=(
+        "社内問い合わせポータルの公開API。認証、チケット、FAQのINPUT/OUTPUTを"
+        "OpenAPIスキーマとして提供します。"
+    ),
+    lifespan=lifespan,
+    openapi_tags=[
+        {"name": "Authentication", "description": "Redmine委譲認証とセッション"},
+        {"name": "Tickets", "description": "問い合わせチケットのユースケース"},
+        {"name": "FAQs", "description": "FAQの検索・管理"},
+        {"name": "Metadata", "description": "ステータス・優先度の選択肢"},
+        {"name": "Operations", "description": "運用監視"},
+    ],
+)
 
 # CORS - explicit origins (no "*" + credentials=True conflict)
 cors_origins = [
@@ -150,9 +199,6 @@ _status_by_name: Dict[str, int] = {}
 _status_by_id: Dict[int, str] = {}
 _status_by_key: Dict[str, int] = {}
 
-ROLE_SALES = "sales"
-ROLE_SUPPORT = "support"
-ROLE_ADMIN = "admin"
 _ROLE_BY_REDMINE_NAME = {
     "営業担当者": ROLE_SALES,
     "サポート担当者": ROLE_SUPPORT,
@@ -165,13 +211,6 @@ CUSTOM_FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "customer_visit_required": {"name": "客先同行要否", "label": "客先同行が必要", "boolean": True, "support_only": False},
     "schedule_assigned": {"name": "予定・担当者アサイン済み", "label": "予定・担当者をアサインした", "boolean": True, "support_only": True},
 }
-
-PRIORITY_ESCALATION_FIELDS = frozenset(
-    {"report_required", "customer_visit_required"}
-)
-AUTHOR_REASSIGNMENT_FIELDS = frozenset(
-    {"report_delivered", "schedule_assigned"}
-)
 
 FAQ_PAGE_PREFIX = "FAQ_"
 FAQ_TEXT_PATTERN = re.compile(r"\AQ: (?P<question>[^\r\n]+)\r?\n\r?\nA:\r?\n(?P<answer>[\s\S]*)\Z")
@@ -261,13 +300,13 @@ def _client(api_key: str) -> httpx.AsyncClient:
     return httpx.AsyncClient(base_url=REDMINE_BASE_URL, headers=headers, timeout=10.0)
 
 
-def get_session_store() -> SessionStore:
+def get_session_store() -> SessionRepository:
     return session_store
 
 
 async def require_session(
     session_id: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
-    store: SessionStore = Depends(get_session_store),
+    store: SessionRepository = Depends(get_session_store),
 ) -> SessionData:
     if not session_id:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -280,47 +319,21 @@ async def require_session(
 # ── Helpers ─────────────────────────────────────────────────────────
 
 def _redmine_bool(value: Any) -> bool:
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    return redmine_bool(value)
 
 
 def _issue_custom_fields(i: Dict[str, Any], include_support_only: bool) -> Dict[str, Any]:
-    values_by_name = {
-        field.get("name"): field.get("value")
-        for field in i.get("custom_fields", [])
-        if isinstance(field, dict)
-    }
-    result: Dict[str, Any] = {}
-    for key, definition in CUSTOM_FIELD_DEFINITIONS.items():
-        if definition["support_only"] and not include_support_only:
-            continue
-        value = values_by_name.get(definition["name"], "0" if definition["boolean"] else "")
-        result[key] = _redmine_bool(value) if definition["boolean"] else str(value or "")
-    return result
+    return issue_custom_fields(
+        i, CUSTOM_FIELD_DEFINITIONS, include_support_only=include_support_only
+    )
 
 
 def _issue_to_dict(i: Dict[str, Any], include_support_only: bool = True) -> Dict[str, Any]:
     """Extract common fields from a Redmine issue dict."""
-    assigned_to = i.get("assigned_to")
-    result = {
-        "id": i["id"],
-        "subject": i.get("subject", ""),
-        "description": i.get("description", ""),
-        "status": i["status"]["name"],
-        "priority": int(i["priority"]["id"]),
-        "priority_name": i["priority"].get("name", ""),
-        "assignee": (
-            {
-                "id": int(assigned_to["id"]),
-                "name": assigned_to.get("name", ""),
-            }
-            if assigned_to
-            else None
-        ),
-        "created_on": i.get("created_on", ""),
-        "updated_on": i.get("updated_on", ""),
-    }
-    result.update(_issue_custom_fields(i, include_support_only))
-    return result
+    return ticket_to_output(
+        issue_to_ticket(i, CUSTOM_FIELD_DEFINITIONS),
+        include_support_only=include_support_only,
+    )
 
 
 def _latest_support_responder(
@@ -349,12 +362,12 @@ def _next_priority_id(
     current_priority_id: int, priorities: List[Dict[str, Any]]
 ) -> int:
     """Return the next Redmine priority by enumeration order, capped at the top."""
-    ids = [int(priority["id"]) for priority in priorities]
     try:
-        current_index = ids.index(int(current_priority_id))
-    except ValueError:
+        return next_priority_id(
+            current_priority_id, [int(priority["id"]) for priority in priorities]
+        )
+    except UnknownPriorityError:
         raise HTTPException(status_code=503, detail="現在の優先度設定を解決できません") from None
-    return ids[min(current_index + 1, len(ids) - 1)]
 
 
 async def _issue_priorities(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
@@ -850,41 +863,16 @@ async def _redmine_faq_page(
     return response.json().get("wiki_page")
 
 
-# ── Endpoints ───────────────────────────────────────────────────────
-
-class CreateTicketRequest(BaseModel):
-    subject: str
-    description: str
-    priority: Optional[int] = None
-    # Backward-compatible input only. Creation always uses the inquiry tracker.
-    tracker_id: Optional[int] = None
-    customer_id: str = ""
-    report_required: bool = False
-    report_delivered: bool = False
-    customer_visit_required: bool = False
-    schedule_assigned: bool = False
+# ── API interface ───────────────────────────────────────────────────
+# Compatibility aliases keep existing Python consumers working while the
+# canonical INPUT schemas live in the application layer.
+CreateTicketRequest = CreateTicketInput
+UpdateCustomFieldsRequest = UpdateCustomFieldsInput
+LoginRequest = LoginInput
+FaqWriteRequest = FaqWriteInput
 
 
-class UpdateCustomFieldsRequest(BaseModel):
-    customer_id: Optional[str] = None
-    report_required: Optional[bool] = None
-    report_delivered: Optional[bool] = None
-    customer_visit_required: Optional[bool] = None
-    schedule_assigned: Optional[bool] = None
-
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-class FaqWriteRequest(BaseModel):
-    question: str
-    answer: str
-    version: Optional[int] = None
-
-
-@app.get("/faqs")
+@app.get("/faqs", response_model=FaqListOutput, tags=["FAQs"])
 async def list_faqs(
     q: str = "",
     limit: int = 20,
@@ -932,7 +920,7 @@ async def list_faqs(
     }
 
 
-@app.post("/faqs", status_code=201)
+@app.post("/faqs", status_code=201, response_model=FaqOutput, tags=["FAQs"])
 async def create_faq(
     faq_data: FaqWriteRequest,
     session: SessionData = Depends(require_session),
@@ -954,7 +942,7 @@ async def create_faq(
     return faq
 
 
-@app.get("/faqs/{faq_id}")
+@app.get("/faqs/{faq_id}", response_model=FaqOutput, tags=["FAQs"])
 async def get_faq(
     faq_id: str,
     session: SessionData = Depends(require_session),
@@ -968,7 +956,7 @@ async def get_faq(
     return faq
 
 
-@app.put("/faqs/{faq_id}")
+@app.put("/faqs/{faq_id}", response_model=FaqOutput, tags=["FAQs"])
 async def update_faq(
     faq_id: str,
     faq_data: FaqWriteRequest,
@@ -1002,7 +990,7 @@ async def update_faq(
     return faq
 
 
-@app.delete("/faqs/{faq_id}")
+@app.delete("/faqs/{faq_id}", response_model=DetailOutput, tags=["FAQs"])
 async def delete_faq(
     faq_id: str,
     session: SessionData = Depends(require_session),
@@ -1019,7 +1007,11 @@ async def delete_faq(
     return {"detail": "FAQを削除しました"}
 
 
-@app.get("/priority/options")
+@app.get(
+    "/priority/options",
+    response_model=list[PriorityOptionOutput],
+    tags=["Metadata"],
+)
 async def priority_options(session: SessionData = Depends(require_session)):
     async with _client(session.redmine_api_key) as client:
         priorities = await _issue_priorities(client)
@@ -1033,11 +1025,11 @@ async def priority_options(session: SessionData = Depends(require_session)):
     ]
 
 
-@app.post("/auth/login")
+@app.post("/auth/login", response_model=AuthSessionOutput, tags=["Authentication"])
 async def login(
     credentials: LoginRequest,
     response: Response,
-    store: SessionStore = Depends(get_session_store),
+    store: SessionRepository = Depends(get_session_store),
 ):
     username = credentials.username.strip()
     if not username or not credentials.password:
@@ -1069,7 +1061,7 @@ async def login(
     }
 
 
-@app.get("/auth/session")
+@app.get("/auth/session", response_model=AuthSessionOutput, tags=["Authentication"])
 async def current_session(session: SessionData = Depends(require_session)):
     return {
         "authenticated": True,
@@ -1077,11 +1069,11 @@ async def current_session(session: SessionData = Depends(require_session)):
     }
 
 
-@app.post("/auth/logout")
+@app.post("/auth/logout", response_model=DetailOutput, tags=["Authentication"])
 async def logout(
     response: Response,
     session_id: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
-    store: SessionStore = Depends(get_session_store),
+    store: SessionRepository = Depends(get_session_store),
 ):
     if session_id:
         await store.delete(session_id)
@@ -1094,7 +1086,12 @@ async def logout(
     )
     return {"detail": "Logged out"}
 
-@app.post("/tickets")
+@app.post(
+    "/tickets",
+    response_model=TicketOutput,
+    response_model_exclude_unset=True,
+    tags=["Tickets"],
+)
 async def create_ticket(
     ticket_data: CreateTicketRequest,
     session: SessionData = Depends(require_session),
@@ -1151,7 +1148,12 @@ async def create_ticket(
             return result
 
 
-@app.get("/tickets")
+@app.get(
+    "/tickets",
+    response_model=TicketListOutput,
+    response_model_exclude_unset=True,
+    tags=["Tickets"],
+)
 async def list_tickets(
     request: Request, session: SessionData = Depends(require_session)
 ):
@@ -1295,7 +1297,12 @@ async def list_tickets(
             }
 
 
-@app.get("/tickets/{ticket_id}")
+@app.get(
+    "/tickets/{ticket_id}",
+    response_model=TicketOutput,
+    response_model_exclude_unset=True,
+    tags=["Tickets"],
+)
 async def get_ticket(ticket_id: int, session: SessionData = Depends(require_session)):
     with tracer.start_as_current_span("get_ticket") as span:
         span.set_attribute("ticket.id", ticket_id)
@@ -1342,7 +1349,11 @@ async def get_ticket(ticket_id: int, session: SessionData = Depends(require_sess
             return data
 
 
-@app.patch("/tickets/{ticket_id}/custom-fields")
+@app.patch(
+    "/tickets/{ticket_id}/custom-fields",
+    response_model=DetailOutput,
+    tags=["Tickets"],
+)
 async def update_custom_fields(
     ticket_id: int,
     field_data: UpdateCustomFieldsRequest,
@@ -1422,10 +1433,11 @@ async def update_custom_fields(
     return {"detail": "Custom fields updated"}
 
 
-class AddCommentRequest(BaseModel):
-    body: str
+AddCommentRequest = AddCommentInput
 
-@app.post("/tickets/{ticket_id}/comments")
+@app.post(
+    "/tickets/{ticket_id}/comments", response_model=DetailOutput, tags=["Tickets"]
+)
 async def add_comment(
     ticket_id: int,
     comment_data: AddCommentRequest,
@@ -1445,7 +1457,9 @@ async def add_comment(
             return {"detail": "Comment added"}
 
 
-@app.post("/tickets/{ticket_id}/answer")
+@app.post(
+    "/tickets/{ticket_id}/answer", response_model=DetailOutput, tags=["Tickets"]
+)
 async def answer_ticket(
     ticket_id: int,
     comment_data: AddCommentRequest,
@@ -1501,15 +1515,13 @@ async def answer_ticket(
         return {"detail": "Answer added; ticket assigned to author and marked answered"}
 
 
-class UpdateStatusRequest(BaseModel):
-    status_id: int
+UpdateStatusRequest = UpdateStatusInput
+UpdatePriorityRequest = UpdatePriorityInput
 
 
-class UpdatePriorityRequest(BaseModel):
-    priority_id: int
-
-
-@app.patch("/tickets/{ticket_id}/assignee")
+@app.patch(
+    "/tickets/{ticket_id}/assignee", response_model=DetailOutput, tags=["Tickets"]
+)
 async def claim_ticket(
     ticket_id: int,
     session: SessionData = Depends(require_session),
@@ -1565,7 +1577,9 @@ async def claim_ticket(
         return {"detail": "Assignee and status updated"}
 
 
-@app.patch("/tickets/{ticket_id}/status")
+@app.patch(
+    "/tickets/{ticket_id}/status", response_model=DetailOutput, tags=["Tickets"]
+)
 async def update_status(
     ticket_id: int,
     status_data: UpdateStatusRequest,
@@ -1635,7 +1649,9 @@ async def update_status(
             return {"detail": "Status updated"}
 
 
-@app.patch("/tickets/{ticket_id}/priority")
+@app.patch(
+    "/tickets/{ticket_id}/priority", response_model=DetailOutput, tags=["Tickets"]
+)
 async def update_priority(
     ticket_id: int,
     priority_data: UpdatePriorityRequest,
@@ -1672,7 +1688,9 @@ async def update_priority(
     return {"detail": "Priority updated"}
 
 
-@app.get("/status/options")
+@app.get(
+    "/status/options", response_model=list[OptionOutput], tags=["Metadata"]
+)
 async def status_options(session: SessionData = Depends(require_session)):
     """Return all Redmine issue statuses for frontend dropdowns."""
     # Refresh with the signed-in user's API key. The startup cache may contain
@@ -1704,7 +1722,7 @@ async def status_options(session: SessionData = Depends(require_session)):
     return result
 
 
-@app.get("/health")
+@app.get("/health", response_model=HealthOutput, tags=["Operations"])
 async def health_check():
     """Return a minimal liveness response without exposing configuration."""
     return {"status": "healthy"}
@@ -1714,7 +1732,4 @@ async def health_check():
 async def global_exception_handler(request: Request, exc: Exception):
     """Log unexpected failures while returning a stable public response."""
     logger.exception("Unhandled exception at %s", request.url.path, exc_info=exc)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"},
-    )
+    return internal_server_error()

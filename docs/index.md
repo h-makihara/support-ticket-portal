@@ -4,6 +4,7 @@
 
 - [概要](overview.md) — システムの目的・構成・ユースケース
 - [アーキテクチャ](architecture.md) — コンポーネント図・デプロイ構成
+- [Backend API 仕様](api.md) — INPUT/OUTPUTスキーマ・権限・エラー契約
 - [MVP スコープ](scope.md) — 実装範囲と除外項目
 
 ## セットアップ・運用
@@ -15,7 +16,7 @@
 ## テスト・その他
 
 - [テストガイド](testing.md) — 観点別E2Eとフルリグレッションの実行方法・適用基準
-- `tests/init_test.yaml` — Redmine 初期化の正しさを検証する runn テスト
+- [Redmine 初期化テスト](../tests/init_test.yaml) — Redmine 初期化の正しさを検証する runn テスト
 - [Changelog](changelog.md) — 変更履歴
 
 その他の情報はプロジェクトルートの README.md を参照してください。

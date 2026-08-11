@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-10
+
+### Backend DDDレイヤーとAPI契約
+
+- Backendを `domain` / `application` / `infrastructure` / `presentation` の責務へ分離
+- Redmine issue JSONをドメインモデルへ変換する腐敗防止層を追加
+- 全APIにPydanticのINPUT/OUTPUTスキーマとOpenAPIタグを定義
+- `backend.auth` と `backend.app` の既存import互換性を維持
+- Backend API仕様とアーキテクチャ、ドキュメント索引を更新
+
 ## Unreleased
 
 ### Changed

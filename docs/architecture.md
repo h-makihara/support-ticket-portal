@@ -1,5 +1,30 @@
 # システムアーキテクチャ
 
+## Backend のレイヤー構成
+
+BackendはDDDを基礎に、内側の業務概念がFastAPI・Redis・Redmineへ依存しない構造にしています。
+
+```text
+backend/
+├── domain/
+│   ├── models/             # Ticket、SessionDataなどの業務モデル
+│   └── services/           # 優先度変更などの業務ポリシー
+├── application/
+│   ├── schemas/            # APIのINPUT / OUTPUT契約
+│   ├── presenters/         # ドメインモデルから公開OUTPUTへの変換
+│   └── ports.py            # 外部永続化に要求するインターフェース
+├── infrastructure/
+│   ├── redmine/            # Redmine JSONとの変換（腐敗防止層）
+│   └── session_store.py    # RedisセッションとRedmine認証
+├── presentation/api/       # HTTP固有の応答・エラー処理
+├── app.py                  # Composition RootとFastAPIルート
+└── auth.py                 # 旧import向け互換ファサード
+```
+
+依存方向は `presentation → application → domain`、`infrastructure → application/domain` です。`app.py` はComposition Rootとして具象アダプターを組み立てます。Redmineのissue JSONは `infrastructure/redmine/mappers.py` でドメインの `Ticket` へ変換し、support専用フィールドの公開可否はapplication presenterで制御します。
+
+HTTP契約は [Backend API仕様](api.md) にまとめています。PydanticのINPUT/OUTPUTスキーマを全ルートへ明示しているため、`/openapi.json`、`/docs`、`/redoc` と文書の型定義は同じ実装を正とします。
+
 ## 実行構成
 
 ```text
