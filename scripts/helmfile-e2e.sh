@@ -12,7 +12,7 @@ SLOT=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --namespace)
-      if [[ "$#" -lt 2 ]]; then
+      if [[ "$#" -lt 2 || -z "$2" ]]; then
         echo "--namespace requires a value" >&2
         exit 2
       fi

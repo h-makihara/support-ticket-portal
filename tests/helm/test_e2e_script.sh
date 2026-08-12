@@ -6,6 +6,7 @@ SCRIPT="$ROOT_DIR/scripts/helmfile-e2e.sh"
 TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/support-ticket-portal-e2e.XXXXXX")"
 FAKE_BIN="$TEST_DIR/bin"
 COMMAND_LOG="$TEST_DIR/commands.log"
+PORT_FORWARD_PID_FILE="$TEST_DIR/port-forward.pid"
 PORTAL_ROOT="$TEST_DIR/portal-root"
 
 cleanup() {
@@ -49,6 +50,22 @@ assert_exit_2() {
   [[ "$status" -eq 2 ]] || fail "expected exit 2, got $status"
 }
 
+assert_slot_skips_ingress_probe() {
+  local curl_invocation curl_url
+  while IFS= read -r curl_invocation; do
+    curl_url="${curl_invocation##* }"
+    [[ "$curl_url" == http://127.0.0.1:* ]] || fail "slot mode probed ingress: $curl_invocation"
+  done < <(sed -n 's/^curl //p' "$COMMAND_LOG")
+}
+
+assert_port_forward_cleaned_up() {
+  local port_forward_pid
+  port_forward_pid="$(<"$PORT_FORWARD_PID_FILE")"
+  if kill -0 "$port_forward_pid" 2>/dev/null; then
+    fail "port-forward process $port_forward_pid is still running after E2E exits"
+  fi
+}
+
 setup_fakes() {
   mkdir -p "$FAKE_BIN" "$PORTAL_ROOT"
   cp -R "$ROOT_DIR/deploy" "$PORTAL_ROOT/deploy"
@@ -56,6 +73,11 @@ setup_fakes() {
 
   cat >"$FAKE_BIN/curl" <<'EOF'
 #!/usr/bin/env bash
+{
+  printf 'curl'
+  printf ' %s' "$@"
+  printf '\n'
+} >>"$FAKE_COMMAND_LOG"
 case "${*: -1}" in
   http://127.0.0.1:*) exit 0 ;;
   *) exit 1 ;;
@@ -68,9 +90,8 @@ cat >"$FAKE_BIN/kubectl" <<'EOF'
   printf ' %s' "$@"
   printf '\n'
 } >>"$FAKE_COMMAND_LOG"
-while :; do
-  command sleep 60
-done
+printf '%s\n' "$$" >"$FAKE_PORT_FORWARD_PID_FILE"
+exec /bin/sleep 60
 EOF
   cat >"$FAKE_BIN/npm" <<'EOF'
 #!/usr/bin/env bash
@@ -98,7 +119,7 @@ EOF
 
 run_e2e() {
   : >"$COMMAND_LOG"
-  PATH="$FAKE_BIN:$PATH" FAKE_COMMAND_LOG="$COMMAND_LOG" PORTAL_ROOT_DIR="$PORTAL_ROOT" "$SCRIPT" "$@" >>"$COMMAND_LOG" 2>&1
+  PATH="$FAKE_BIN:$PATH" FAKE_COMMAND_LOG="$COMMAND_LOG" FAKE_PORT_FORWARD_PID_FILE="$PORT_FORWARD_PID_FILE" PORTAL_ROOT_DIR="$PORTAL_ROOT" "$SCRIPT" "$@" >>"$COMMAND_LOG" 2>&1
 }
 
 setup_fakes
@@ -106,9 +127,8 @@ setup_fakes
 run_e2e dev --namespace team-space --slot green e2e/ticket-creation.spec.ts
 assert_kubectl_called '-n team-space port-forward service/frontend-green 18080:80'
 assert_npm_called 'playwright test e2e/ticket-creation.spec.ts'
-if grep -Fq 'Ingress is unavailable' "$COMMAND_LOG"; then
-  fail 'slot mode probed ingress instead of port-forwarding immediately'
-fi
+assert_slot_skips_ingress_probe
+assert_port_forward_cleaned_up
 
 run_e2e dev --namespace team-space e2e/faq.spec.ts
 assert_namespace_is team-space
@@ -116,5 +136,6 @@ assert_stable_service_fallback 'service/frontend'
 
 assert_exit_2 run_e2e dev --slot red
 assert_exit_2 run_e2e dev --namespace
+assert_exit_2 run_e2e dev --namespace ""
 
 echo "PASS: helmfile E2E script namespace and slot options"
