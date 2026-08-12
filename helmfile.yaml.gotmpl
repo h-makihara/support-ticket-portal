@@ -63,6 +63,8 @@ releases:
     values:
       - deploy/environments/{{ .Environment.Name }}.yaml
       - environment: {{ .Environment.Name | quote }}
+        blueGreen:
+          phase: {{ env "PORTAL_BLUE_GREEN_PHASE" | default "active" | quote }}
         app:
           testUsers:
             usernamePrefix: {{ .Environment.Name | quote }}

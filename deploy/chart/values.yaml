@@ -53,6 +53,8 @@ app:
 # Frontend and Backend run in both slots. Stable Services select activeSlot.
 # Set an inactive slot's tags, sync and verify it, then change activeSlot and sync again.
 blueGreen:
+  # Internal deploy-script phase. Operators normally leave this as active.
+  phase: active
   activeSlot: blue
   slots:
     blue:

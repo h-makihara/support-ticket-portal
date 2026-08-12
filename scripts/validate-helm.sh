@@ -37,6 +37,10 @@ helm lint deploy/chart \
   --set secrets.testSupportPassword="$TEST_SUPPORT_PASSWORD" \
   --set secrets.testSalesPassword="$TEST_SALES_PASSWORD"
 
+ruby tests/helm/manifest_assertions.rb active
+ruby tests/helm/manifest_assertions.rb migration
+ruby tests/helm/manifest_assertions.rb coexist
+
 for environment in int dev stg prd; do
   portal_select_environment "$environment"
   rendered="$(helmfile --environment "$environment" template)"
