@@ -48,3 +48,6 @@ coverage.xml
 frontend/playwright-report/
 frontend/test-results/
 backups/
+
+# Local isolated development worktrees
+.worktrees/
