@@ -4,11 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENVIRONMENT="${1:-}"
 ACTION="${2:-sync}"
+NAMESPACE="${3:-}"
 
 # shellcheck source=scripts/lib/helmfile-env.sh
 source "$ROOT_DIR/scripts/lib/helmfile-env.sh"
 
-portal_select_environment "$ENVIRONMENT"
+portal_select_environment "$ENVIRONMENT" true "$NAMESPACE"
+export PORTAL_NAMESPACE
 
 case "$ACTION" in
   info)

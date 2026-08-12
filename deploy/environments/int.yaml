@@ -12,6 +12,11 @@ images:
   frontend: {repository: support-ticket-portal/frontend, tag: int, pullPolicy: Always}
   otelCollector: {repository: otel/opentelemetry-collector-contrib, tag: latest, pullPolicy: Always}
   alloy: {repository: grafana/alloy, tag: latest, pullPolicy: Always}
+blueGreen:
+  activeSlot: blue
+  slots:
+    blue: {backendTag: int, frontendTag: int}
+    green: {backendTag: int, frontendTag: int}
 app:
   sessionCookieSecure: false
   backendEnv: {DEPLOY_ENVIRONMENT: int}

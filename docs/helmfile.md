@@ -17,6 +17,8 @@ Docker Compose は従来どおりローカル開発に利用できます。Kuber
 
 ```bash
 ./scripts/helmfile-deploy.sh int info
+# Namespaceを明示する場合（省略時は support-ticket-portal-int）
+./scripts/helmfile-deploy.sh int info team-preview
 ```
 
 このコマンドはNamespace、Portal/Redmine URL、int/devで有効なBackend・Swagger UI・ReDoc URL、Traefik方式、valuesとsecretファイルの場所、テストユーザー名と対応するパスワード変数名を表示します。
@@ -73,11 +75,40 @@ ${EDITOR:-vi} deploy/env/int.env
 # デプロイまたは更新
 ./scripts/helmfile-deploy.sh int sync
 
+# 任意のNamespaceへデプロイ
+./scripts/helmfile-deploy.sh int sync team-preview
+
 # 状態確認
 kubectl -n support-ticket-portal-int get pods,ingress
 ```
 
 環境名を `dev`、`stg`、`prd` に変えると、values、Namespace、イメージタグ、Ingress host、テストユーザー設定がまとめて切り替わります。
+
+コマンド形式は `helmfile-deploy.sh <environment> [action] [namespace]` です。Namespace引数を省略した場合は従来どおり `support-ticket-portal-<environment>` を使います。指定値はKubernetesのDNS label（小文字英数字と`-`、最大63文字）として検証され、Helm releaseと組み込みTraefikの監視対象の両方へ反映されます。URLのhostはNamespaceとは独立しており、従来どおりvaluesの`url.namespace`または各Ingressの`host`で設定します。
+
+## Blue-Greenデプロイ
+
+FrontendとBackendはそれぞれ`blue`、`green`の2つのDeploymentとして常時起動します。Ingressが参照する`frontend`、`backend` Serviceは、`blueGreen.activeSlot`のslot labelを持つPodだけを選択します。PostgreSQL、Redis、Redmineなどの永続系コンポーネントは両slotで共有します。
+
+```yaml
+blueGreen:
+  activeSlot: blue
+  slots:
+    blue:
+      backendTag: "2026.08.1"
+      frontendTag: "2026.08.1"
+    green:
+      backendTag: "2026.08.2"
+      frontendTag: "2026.08.2"
+```
+
+空のslot tagは従来の`images.backend.tag`または`images.frontend.tag`へフォールバックします。切替時は、次の2段階で同期します。
+
+1. 現在の`activeSlot`は変えず、inactive slotの`backendTag`と`frontendTag`だけを新バージョンへ更新して`sync`します。
+2. `kubectl -n <namespace> rollout status deployment/backend-<inactive>`と`frontend-<inactive>`でreadyを確認します。
+3. `activeSlot`をinactive slotへ変更し、もう一度`sync`します。安定ServiceのselectorがFrontend/Backendとも新slotへ切り替わります。
+
+切替後に問題があれば、`activeSlot`を直前のslotへ戻して`sync`するとrollbackできます。データベースschemaは両slotから同時利用できる後方互換なmigrationにしてください。
 
 ### Traefikを一緒に導入・破棄するか切り替える
 
@@ -143,8 +174,9 @@ mkdir -p "$BACKUP_DIR"
 Portal 経由の更新を防ぐため Backend を停止します。Redmine 用 Ingress を別途有効化している場合は、そちらからの直接操作も停止してください。
 
 ```bash
-kubectl -n "$NAMESPACE" scale deployment/backend --replicas=0
-kubectl -n "$NAMESPACE" rollout status deployment/backend --timeout=120s
+kubectl -n "$NAMESPACE" scale deployment/backend-blue deployment/backend-green --replicas=0
+kubectl -n "$NAMESPACE" rollout status deployment/backend-blue --timeout=120s
+kubectl -n "$NAMESPACE" rollout status deployment/backend-green --timeout=120s
 ```
 
 バックアップ後に環境を破棄しない場合は、`./scripts/helmfile-deploy.sh "$ENVIRONMENT" sync` で values の replica 数へ戻せます。

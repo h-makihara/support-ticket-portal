@@ -14,7 +14,7 @@
 
 ```bash
 ./scripts/helmfile-deploy.sh int info
+./scripts/helmfile-deploy.sh int info team-preview
 ```
 
-デプロイ、E2E、バックアップ、破棄の詳細は[Helmfileデプロイガイド](../docs/helmfile.md)を参照してください。
-
+第3引数でNamespaceを指定できます。省略時は`support-ticket-portal-<env>`です。Frontend/Backendは`blueGreen.activeSlot`で安定Serviceの接続先を切り替えるBlue-Green構成です。切替手順、E2E、バックアップ、破棄の詳細は[Helmfileデプロイガイド](../docs/helmfile.md)を参照してください。

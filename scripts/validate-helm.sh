@@ -56,6 +56,11 @@ for environment in int dev stg prd; do
     expected_ingress_class="$external_class"
   fi
   assert_contains "$rendered" "ingressClassName: $expected_ingress_class" "$environment must use IngressClass $expected_ingress_class"
+  assert_contains "$rendered" "name: backend-blue" "$environment must render the blue Backend Deployment"
+  assert_contains "$rendered" "name: backend-green" "$environment must render the green Backend Deployment"
+  assert_contains "$rendered" "name: frontend-blue" "$environment must render the blue Frontend Deployment"
+  assert_contains "$rendered" "name: frontend-green" "$environment must render the green Frontend Deployment"
+  assert_contains "$rendered" "app.kubernetes.io/slot: blue" "$environment Services must initially select the blue slot"
   assert_contains "$rendered" "host: \"${PORTAL_URL#*://}\"" "$environment Portal URL must match the shared script convention"
   assert_contains "$rendered" "host: \"${PORTAL_REDMINE_URL#*://}\"" "$environment Redmine URL must match the shared script convention"
   if [[ "$environment" == "int" || "$environment" == "dev" ]]; then
@@ -87,5 +92,16 @@ for environment in int dev stg prd; do
     grep -q 'image: "grafana/alloy:latest"' <<<"$rendered"
   fi
 done
+
+custom_namespace_info="$(./scripts/helmfile-deploy.sh dev info team-preview)"
+assert_contains "$custom_namespace_info" "Namespace   : team-preview" "deploy script must accept a custom namespace"
+
+if ./scripts/helmfile-deploy.sh dev info 'INVALID_NAMESPACE' >/dev/null 2>&1; then
+  echo "deploy script must reject an invalid Kubernetes namespace" >&2
+  exit 1
+fi
+
+custom_namespace_state="$(PORTAL_NAMESPACE=team-preview helmfile --environment dev build)"
+assert_contains "$custom_namespace_state" "namespace: team-preview" "Helmfile releases must use the custom namespace"
 
 echo "Helm/Helmfile validation passed for int, dev, stg, and prd"

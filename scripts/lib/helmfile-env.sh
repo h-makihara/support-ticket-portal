@@ -44,6 +44,7 @@ portal_yaml_nested_value() {
 portal_select_environment() {
   local environment="${1:-}"
   local allow_production="${2:-true}"
+  local namespace="${3:-}"
 
   case "$environment" in
     int|dev|stg) ;;
@@ -60,7 +61,11 @@ portal_select_environment() {
   esac
 
   PORTAL_ENVIRONMENT="$environment"
-  PORTAL_NAMESPACE="support-ticket-portal-$environment"
+  PORTAL_NAMESPACE="${namespace:-support-ticket-portal-$environment}"
+  if [[ ! "$PORTAL_NAMESPACE" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ || ${#PORTAL_NAMESPACE} -gt 63 ]]; then
+    echo "namespace must be a valid Kubernetes DNS label (lowercase, max 63 characters): $PORTAL_NAMESPACE" >&2
+    return 2
+  fi
   PORTAL_VALUES_FILE="$PORTAL_ROOT_DIR/deploy/environments/$environment.yaml"
   PORTAL_CHART_VALUES_FILE="$PORTAL_ROOT_DIR/deploy/chart/values.yaml"
   PORTAL_ENV_FILE="$PORTAL_ROOT_DIR/deploy/env/$environment.env"

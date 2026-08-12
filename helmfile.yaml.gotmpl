@@ -27,7 +27,7 @@ environments:
 ---
 releases:
   - name: support-ticket-portal-{{ .Environment.Name }}-traefik
-    namespace: support-ticket-portal-{{ .Environment.Name }}
+    namespace: {{ env "PORTAL_NAMESPACE" | default (printf "support-ticket-portal-%s" .Environment.Name) }}
     chart: traefik/traefik
     version: 41.2.0
     installed: {{ .Values.traefik.install }}
@@ -43,7 +43,7 @@ releases:
             enabled: true
             ingressClass: {{ .Values.traefik.bundledIngressClass | quote }}
             namespaces:
-              - support-ticket-portal-{{ .Environment.Name }}
+              - {{ env "PORTAL_NAMESPACE" | default (printf "support-ticket-portal-%s" .Environment.Name) | quote }}
         rbac:
           enabled: true
           # IngressClass is cluster-scoped, so the controller needs ClusterRole access.
@@ -54,11 +54,11 @@ releases:
             type: {{ .Values.traefik.serviceType | quote }}
 
   - name: support-ticket-portal-{{ .Environment.Name }}
-    namespace: support-ticket-portal-{{ .Environment.Name }}
+    namespace: {{ env "PORTAL_NAMESPACE" | default (printf "support-ticket-portal-%s" .Environment.Name) }}
     chart: ./deploy/chart
     {{- if .Values.traefik.install }}
     needs:
-      - support-ticket-portal-{{ .Environment.Name }}/support-ticket-portal-{{ .Environment.Name }}-traefik
+      - {{ env "PORTAL_NAMESPACE" | default (printf "support-ticket-portal-%s" .Environment.Name) }}/support-ticket-portal-{{ .Environment.Name }}-traefik
     {{- end }}
     values:
       - deploy/environments/{{ .Environment.Name }}.yaml
