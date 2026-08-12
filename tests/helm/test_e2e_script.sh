@@ -79,12 +79,15 @@ setup_fakes() {
   printf '\n'
 } >>"$FAKE_COMMAND_LOG"
 case "${*: -1}" in
-  http://127.0.0.1:*) exit 0 ;;
+  http://127.0.0.1:*) [[ -s "$FAKE_PORT_FORWARD_PID_FILE" ]] ;;
   *) exit 1 ;;
 esac
 EOF
 cat >"$FAKE_BIN/kubectl" <<'EOF'
 #!/usr/bin/env bash
+if [[ -n "${FAKE_KUBECTL_INIT_DELAY:-}" ]]; then
+  /bin/sleep "$FAKE_KUBECTL_INIT_DELAY"
+fi
 {
   printf 'kubectl'
   printf ' %s' "$@"
@@ -119,6 +122,7 @@ EOF
 
 run_e2e() {
   : >"$COMMAND_LOG"
+  rm -f "$PORT_FORWARD_PID_FILE"
   PATH="$FAKE_BIN:$PATH" FAKE_COMMAND_LOG="$COMMAND_LOG" FAKE_PORT_FORWARD_PID_FILE="$PORT_FORWARD_PID_FILE" PORTAL_ROOT_DIR="$PORTAL_ROOT" "$SCRIPT" "$@" >>"$COMMAND_LOG" 2>&1
 }
 
@@ -132,6 +136,9 @@ assert_port_forward_cleaned_up
 
 run_e2e dev --namespace team-space e2e/faq.spec.ts
 assert_namespace_is team-space
+assert_stable_service_fallback 'service/frontend'
+
+FAKE_KUBECTL_INIT_DELAY=0.05 run_e2e dev --namespace team-space e2e/faq.spec.ts
 assert_stable_service_fallback 'service/frontend'
 
 assert_exit_2 run_e2e dev --slot red
