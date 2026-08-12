@@ -22,6 +22,12 @@ if ! cmp -s scripts/bootstrap_redmine.rb deploy/chart/files/bootstrap_redmine.rb
   exit 1
 fi
 
+ruby tests/helm/manifest_assertions.rb active
+ruby tests/helm/manifest_assertions.rb migration
+ruby tests/helm/manifest_assertions.rb coexist
+bash tests/helm/test_deploy_script.sh
+bash tests/helm/test_e2e_script.sh
+
 export REDMINE_API_KEY=validation-api-key
 export REDMINE_SECRET_KEY_BASE=validation-secret-key-base
 export POSTGRES_PASSWORD=validation-postgres-password
@@ -36,10 +42,6 @@ helm lint deploy/chart \
   --set secrets.testAdminPassword="$TEST_ADMIN_PASSWORD" \
   --set secrets.testSupportPassword="$TEST_SUPPORT_PASSWORD" \
   --set secrets.testSalesPassword="$TEST_SALES_PASSWORD"
-
-ruby tests/helm/manifest_assertions.rb active
-ruby tests/helm/manifest_assertions.rb migration
-ruby tests/helm/manifest_assertions.rb coexist
 
 for environment in int dev stg prd; do
   portal_select_environment "$environment"
@@ -64,7 +66,6 @@ for environment in int dev stg prd; do
   assert_contains "$rendered" "name: backend-green" "$environment must render the green Backend Deployment"
   assert_contains "$rendered" "name: frontend-blue" "$environment must render the blue Frontend Deployment"
   assert_contains "$rendered" "name: frontend-green" "$environment must render the green Frontend Deployment"
-  assert_contains "$rendered" "app.kubernetes.io/slot: blue" "$environment Services must initially select the blue slot"
   assert_contains "$rendered" "host: \"${PORTAL_URL#*://}\"" "$environment Portal URL must match the shared script convention"
   assert_contains "$rendered" "host: \"${PORTAL_REDMINE_URL#*://}\"" "$environment Redmine URL must match the shared script convention"
   if [[ "$environment" == "int" || "$environment" == "dev" ]]; then

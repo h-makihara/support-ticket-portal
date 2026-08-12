@@ -89,9 +89,12 @@ cp deploy/env/int.env.example deploy/env/int.env
 ./scripts/helmfile-deploy.sh int info
 ./scripts/helmfile-deploy.sh int sync
 ./scripts/helmfile-e2e.sh int
+# custom Namespaceを最初の配置先にする例と、inactive slotの直接E2E
+./scripts/helmfile-deploy.sh int sync team-space
+./scripts/helmfile-e2e.sh int --namespace team-space --slot green
 ```
 
-クラスタ前提、イメージ、DNS/TLS、StorageClass、運用上の確認事項は [Helmfile デプロイガイド](docs/helmfile.md) を参照してください。
+custom Namespaceは同じenvironmentの並行コピーを作るためには使えません。クラスタ前提、イメージ、DNS/TLS、StorageClass、Blue-Green運用、バックアップ、運用上の確認事項は [Helmfile デプロイガイド](docs/helmfile.md) を参照してください。
 
 ## 設定
 

@@ -14,7 +14,8 @@
 
 ```bash
 ./scripts/helmfile-deploy.sh int info
-./scripts/helmfile-deploy.sh int info team-preview
+./scripts/helmfile-deploy.sh int sync team-space
+./scripts/helmfile-e2e.sh int --namespace team-space --slot green
 ```
 
-第3引数でNamespaceを指定できます。省略時は`support-ticket-portal-<env>`です。Frontend/Backendは`blueGreen.activeSlot`で安定Serviceの接続先を切り替えるBlue-Green構成です。切替手順、E2E、バックアップ、破棄の詳細は[Helmfileデプロイガイド](../docs/helmfile.md)を参照してください。
+第3引数でNamespaceを指定できます。省略時は`support-ticket-portal-<env>`です。custom Namespaceは環境の最初の配置先であり、同じenvironmentを複数Namespaceへ並行配置するものではありません。Frontend/Backendは`blueGreen.activeSlot`で安定Serviceの接続先を切り替えるBlue-Green構成です。切替手順、E2E、バックアップ、破棄の詳細は[Helmfileデプロイガイド](../docs/helmfile.md)を参照してください。

@@ -16,7 +16,8 @@ help:
 	@echo "  make helm-template ENV=int - Render one Helmfile environment"
 	@echo "  make helm-validate - Validate the chart and all environments"
 	@echo "  ./scripts/helmfile-deploy.sh int info - Show URLs and test users"
-	@echo "  ./scripts/helmfile-deploy.sh int sync team-preview - Deploy to a custom namespace"
+	@echo "  ./scripts/helmfile-deploy.sh int sync team-space - Deploy an environment to its initial custom namespace"
+	@echo "  ./scripts/helmfile-e2e.sh int --namespace team-space --slot green - Run E2E against one slot"
 	@echo "  make clean    - Remove .venv and cache files"
 
 deps:

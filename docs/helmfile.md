@@ -75,8 +75,8 @@ ${EDITOR:-vi} deploy/env/int.env
 # デプロイまたは更新
 ./scripts/helmfile-deploy.sh int sync
 
-# 任意のNamespaceへデプロイ
-./scripts/helmfile-deploy.sh int sync team-preview
+# 任意のNamespaceを最初の配置先として指定
+./scripts/helmfile-deploy.sh int sync team-space
 
 # 状態確認
 kubectl -n support-ticket-portal-int get pods,ingress
@@ -84,11 +84,13 @@ kubectl -n support-ticket-portal-int get pods,ingress
 
 環境名を `dev`、`stg`、`prd` に変えると、values、Namespace、イメージタグ、Ingress host、テストユーザー設定がまとめて切り替わります。
 
-コマンド形式は `helmfile-deploy.sh <environment> [action] [namespace]` です。Namespace引数を省略した場合は従来どおり `support-ticket-portal-<environment>` を使います。指定値はKubernetesのDNS label（小文字英数字と`-`、最大63文字）として検証され、Helm releaseと組み込みTraefikの監視対象の両方へ反映されます。URLのhostはNamespaceとは独立しており、従来どおりvaluesの`url.namespace`または各Ingressの`host`で設定します。
+コマンド形式は `helmfile-deploy.sh <environment> [action] [namespace]` です。Namespace引数を省略した場合は `support-ticket-portal-<environment>` を使います。指定値はKubernetesのDNS label（小文字英数字と`-`、最大63文字）として検証され、Helm releaseと組み込みTraefikの監視対象の両方へ反映されます。URLのhostはNamespaceとは独立しており、従来どおりvaluesの`url.namespace`または各Ingressの`host`で設定します。
+
+Namespaceの指定は、その環境の**最初の配置先**を選ぶためだけのものです。environmentごとのHelm release名は固定なので、同じenvironmentを別Namespaceへ並行して複製することはできません。既存releaseを検出した`sync`は重複を拒否します。Namespaceを移すときは、まずバックアップを取り、現在のNamespaceをdestroyしてから、新しいNamespaceを第3引数に指定して再作成してください。
 
 ## Blue-Greenデプロイ
 
-FrontendとBackendはそれぞれ`blue`、`green`の2つのDeploymentとして常時起動します。Ingressが参照する`frontend`、`backend` Serviceは、`blueGreen.activeSlot`のslot labelを持つPodだけを選択します。PostgreSQL、Redis、Redmineなどの永続系コンポーネントは両slotで共有します。
+FrontendとBackendはそれぞれ`blue`、`green`の2つのDeploymentとして常時起動します。Ingressが参照する`frontend`、`backend` Serviceは、`blueGreen.activeSlot`のslot labelを持つPodだけを選択します。Portal Frontendは常に同じslotのBackendへ接続するため、slotをまたいだ組み合わせにはなりません。PostgreSQL、Redis、Redmineなどの永続系コンポーネントは両slotで共有します。
 
 ```yaml
 blueGreen:
@@ -102,13 +104,29 @@ blueGreen:
       frontendTag: "2026.08.2"
 ```
 
-空のslot tagは従来の`images.backend.tag`または`images.frontend.tag`へフォールバックします。切替時は、次の2段階で同期します。
+空のslot tagは従来の`images.backend.tag`または`images.frontend.tag`へフォールバックします。両slotのFrontend/Backendが同時に動くため、これらアプリケーションのresource requestsは通常時のおよそ2倍をクラスタに確保します。
 
-1. 現在の`activeSlot`は変えず、inactive slotの`backendTag`と`frontendTag`だけを新バージョンへ更新して`sync`します。
-2. `kubectl -n <namespace> rollout status deployment/backend-<inactive>`と`frontend-<inactive>`でreadyを確認します。
-3. `activeSlot`をinactive slotへ変更し、もう一度`sync`します。安定ServiceのselectorがFrontend/Backendとも新slotへ切り替わります。
+従来の単一Deployment chartから最初に`sync`する場合、スクリプトは`migration`、`coexist`、`active`の3 phaseを自動で順に実行します。migration中は既存endpointを維持し、coexistで両slotを起動してから、activeで安定Serviceをslotへ切り替えます。operatorがphaseを個別に実行する必要はありません。
 
-切替後に問題があれば、`activeSlot`を直前のslotへ戻して`sync`するとrollbackできます。データベースschemaは両slotから同時利用できる後方互換なmigrationにしてください。
+通常のリリースは**2回のsync**で切り替えます。例では現在のactive slotを`blue`、inactive slotを`green`とします。
+
+```bash
+ENVIRONMENT=dev
+NAMESPACE="support-ticket-portal-${ENVIRONMENT}"
+
+# activeSlotはblueのまま、greenのbackendTag/frontendTagを新しいimage tagに更新する。
+./scripts/helmfile-deploy.sh "$ENVIRONMENT" sync "$NAMESPACE"
+
+# 両方のinactive Deploymentがreadyであることを確認し、inactive slotを直接smoke testする。
+kubectl -n "$NAMESPACE" rollout status deployment/backend-green
+kubectl -n "$NAMESPACE" rollout status deployment/frontend-green
+./scripts/helmfile-e2e.sh dev --namespace "$NAMESPACE" --slot green
+
+# blueGreen.activeSlotをgreenへ変更してから、2回目のsyncでFrontend/Backendを同時に切り替える。
+./scripts/helmfile-deploy.sh "$ENVIRONMENT" sync "$NAMESPACE"
+```
+
+切替後に問題があれば、`blueGreen.activeSlot`を直前のslot（この例では`blue`）へ戻して`sync`するとrollbackできます。データベースschemaは両slotから同時利用できる後方互換なmigrationにしてください。
 
 ### Traefikを一緒に導入・破棄するか切り替える
 
@@ -179,7 +197,7 @@ kubectl -n "$NAMESPACE" rollout status deployment/backend-blue --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/backend-green --timeout=120s
 ```
 
-バックアップ後に環境を破棄しない場合は、`./scripts/helmfile-deploy.sh "$ENVIRONMENT" sync` で values の replica 数へ戻せます。
+バックアップ後に環境を破棄しない場合は、`./scripts/helmfile-deploy.sh "$ENVIRONMENT" sync "$NAMESPACE"` で values の replica 数へ戻せます。
 
 ### 3. PostgreSQL と添付ファイルのバックアップ
 
@@ -224,10 +242,12 @@ tar -tzf "$BACKUP_DIR/redmine-files.tar.gz" >/dev/null
 
 ### 5. Helm release の削除
 
-バックアップ検証後に release を削除します。`traefik.install: true`の場合は依存関係の逆順でアプリ、Traefikの順に両releaseを削除します。この操作により Deployment、Service、Ingress、Secret、および Helm が直接管理する `redmine-files` PVC が削除されます。先に実行すると添付ファイルを回収できなくなる可能性があります。
+バックアップ検証後に release を削除します。destroyの前に、表示されたreleaseが設定した`ENVIRONMENT`と`NAMESPACE`の組み合わせであることを必ず比較・確認してください。`traefik.install: true`の場合は依存関係の逆順でアプリ、Traefikの順に両releaseを削除します。この操作により Deployment、Service、Ingress、Secret、および Helm が直接管理する `redmine-files` PVC が削除されます。先に実行すると添付ファイルを回収できなくなる可能性があります。
 
 ```bash
-./scripts/helmfile-deploy.sh "$ENVIRONMENT" destroy
+helm -n "$NAMESPACE" list --all
+# 出力のrelease/NamespaceがENVIRONMENTとNAMESPACEの値に一致することを確認してから実行する。
+./scripts/helmfile-deploy.sh "$ENVIRONMENT" destroy "$NAMESPACE"
 
 helm -n "$NAMESPACE" list --all
 kubectl -n "$NAMESPACE" get all,ingress,pvc
@@ -253,7 +273,7 @@ kubectl get pv
 空の環境は、保管してある環境別シークレットを `deploy/env/<env>.env` に戻して、通常どおり作成できます。
 
 ```bash
-./scripts/helmfile-deploy.sh "$ENVIRONMENT" sync
+./scripts/helmfile-deploy.sh "$ENVIRONMENT" sync "$NAMESPACE"
 ```
 
 過去データを戻す場合は、同じ Redmine/PostgreSQL のメジャーバージョンを使用し、PostgreSQL dump と `redmine-files.tar.gz` を必ず同じバックアップ世代から復元します。復元後にバージョンアップする場合は、まず元バージョンで復元確認してから段階的に更新してください。
@@ -309,6 +329,8 @@ Helmのpost-install/post-upgrade bootstrap Jobは、有効な環境でこれら�
 ```bash
 ./scripts/helmfile-e2e.sh int
 ./scripts/helmfile-e2e.sh dev e2e/ticket-creation.spec.ts
+# 指定slotを直接確認する場合は、そのslotのFrontend Serviceへport-forwardする。
+./scripts/helmfile-e2e.sh dev --namespace support-ticket-portal-dev --slot green
 ```
 
 共有クラスタなど既定ホスト名を変更した場合は `E2E_BASE_URL=https://... ./scripts/helmfile-e2e.sh stg` のように上書きします。prd はスクリプト側でも拒否し、テストユーザーを作りません。
@@ -340,7 +362,7 @@ Redmineのstatus `1`は有効です。ユーザーが存在しない場合、`de
 make helm-validate
 ```
 
-この検証は chart の lint、4 環境の render、および Compose/Helm が共有する Redmine bootstrap スクリプトの同期を確認します。`scripts/bootstrap_redmine.rb` を変更した場合は `deploy/chart/files/bootstrap_redmine.rb` に同じ変更を反映してください。
+この検証は、Compose/Helmが共有するRedmine bootstrapスクリプトの同期、各Blue-Green phaseのmanifest構造、deploy/E2EスクリプトのNamespace・slot挙動、chartのlint、4環境のrenderを確認します。`scripts/bootstrap_redmine.rb` を変更した場合は `deploy/chart/files/bootstrap_redmine.rb` に同じ変更を反映してください。
 
 さらに、環境ごとのTraefik導入有無とIngressClass、URL規則、テストユーザー名、stg/prdの固定済みobservabilityイメージタグを検証します。
 

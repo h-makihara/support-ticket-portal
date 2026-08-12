@@ -21,6 +21,8 @@ int/dev/stgでは、環境名から`<env>-sales`と`<env>-support`を生成し�
 
 ```bash
 ./scripts/helmfile-deploy.sh int info
+# custom Namespaceを最初の配置先として使う場合は、syncでも同じ第3引数を指定する。
+./scripts/helmfile-deploy.sh int sync team-space
 ```
 
 デプロイ後は専用スクリプトから実行します。
@@ -28,6 +30,8 @@ int/dev/stgでは、環境名から`<env>-sales`と`<env>-support`を生成し�
 ```bash
 ./scripts/helmfile-e2e.sh int
 ./scripts/helmfile-e2e.sh stg e2e/ticket-creation.spec.ts
+# custom Namespace内のinactive slotを直接検証する例
+./scripts/helmfile-e2e.sh int --namespace team-space --slot green
 ```
 
 Ingressへ接続できない場合はFrontend Serviceへのport-forwardへ自動フォールバックします。共有クラスタなどURLが異なる場合は`E2E_BASE_URL`を明示します。prdではテストユーザーを作らず、このスクリプトも実行できません。
