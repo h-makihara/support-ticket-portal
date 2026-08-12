@@ -28,6 +28,31 @@ def deployment_image(documents, name, container)
   containers.find { |item| item.fetch("name") == container }.fetch("image")
 end
 
+def assert_frontend_nginx_config(documents, slot)
+  deployment = resource(documents, "Deployment", "frontend-#{slot}")
+  template = deployment.fetch("spec").fetch("template")
+  checksum = template.fetch("metadata").fetch("annotations").fetch("checksum/frontend-nginx-config")
+  raise "frontend #{slot} Nginx config checksum must be non-empty" unless checksum.is_a?(String) && !checksum.empty?
+
+  frontend = template.fetch("spec").fetch("containers").find { |container| container.fetch("name") == "frontend" }
+  mount = frontend.fetch("volumeMounts").find { |volume_mount| volume_mount.fetch("name") == "nginx-config" }
+  raise "frontend #{slot} must mount nginx-config" unless mount
+  raise "frontend #{slot} Nginx config mount path" unless mount.fetch("mountPath") == "/etc/nginx/conf.d/default.conf"
+  raise "frontend #{slot} Nginx config subPath" unless mount.fetch("subPath") == "default.conf"
+
+  volume = template.fetch("spec").fetch("volumes").find { |item| item.fetch("name") == "nginx-config" }
+  raise "frontend #{slot} Nginx config volume" unless volume&.dig("configMap", "name") == "frontend-#{slot}-nginx"
+end
+
+def assert_legacy_deployment_selector(documents, name)
+  deployment = resource(documents, "Deployment", name)
+  selector_keys = deployment.dig("spec", "selector", "matchLabels").keys.sort
+  raise "legacy #{name} selector keys" unless selector_keys == ["app.kubernetes.io/instance", "app.kubernetes.io/name"]
+
+  slot = deployment.dig("spec", "template", "metadata", "labels", "app.kubernetes.io/slot")
+  raise "legacy #{name} pod template must select blue" unless slot == "blue"
+end
+
 def render(overrides)
   command = ["helm", "template", "support-ticket-portal", "deploy/chart"]
   (SECRETS + overrides).each { |value| command.concat(["--set", value]) }
@@ -78,15 +103,14 @@ def assert_active
   raise "wrong green frontend image" unless deployment_image(docs, "frontend-green", "frontend").end_with?(":frontend-green-test")
   raise "blue frontend routes to wrong backend" unless resource(docs, "ConfigMap", "frontend-blue-nginx").fetch("data").fetch("default.conf").include?("proxy_pass http://backend-blue:8000/;")
   raise "green frontend routes to wrong backend" unless resource(docs, "ConfigMap", "frontend-green-nginx").fetch("data").fetch("default.conf").include?("proxy_pass http://backend-green:8000/;")
-  raise "slot frontend must mount its Nginx ConfigMap" unless resource(docs, "Deployment", "frontend-green").dig("spec", "template", "spec", "volumes").any? { |volume| volume.dig("configMap", "name") == "frontend-green-nginx" }
+  %w[blue green].each { |slot| assert_frontend_nginx_config(docs, slot) }
 
   assert_negative_renders
 end
 
 def assert_migration
   docs = documents_for(["blueGreen.phase=migration"])
-  raise unless resource(docs, "Deployment", "backend").dig("spec", "selector", "matchLabels").keys.sort == ["app.kubernetes.io/instance", "app.kubernetes.io/name"]
-  raise unless resource(docs, "Deployment", "backend").dig("spec", "template", "metadata", "labels", "app.kubernetes.io/slot") == "blue"
+  %w[backend frontend].each { |name| assert_legacy_deployment_selector(docs, name) }
   raise if selector(docs, "Service", "backend").key?("app.kubernetes.io/slot")
   raise if selector(docs, "Service", "frontend").key?("app.kubernetes.io/slot")
   raise if docs.key?(["Deployment", "backend-blue"])
