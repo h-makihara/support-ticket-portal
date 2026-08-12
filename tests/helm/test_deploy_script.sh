@@ -10,6 +10,7 @@ PORTAL_TEST_LOG="$TEST_DIR/commands.log"
 FAILURES=0
 DEPLOY_OUTPUT=""
 DEPLOY_STATUS=0
+CALLER_PHASE=""
 
 cleanup() {
   rm -rf "$TEST_DIR"
@@ -38,33 +39,62 @@ EOF
 #!/usr/bin/env bash
 printf 'helm|%s|namespace=%s|phase=%s\n' "$*" "${PORTAL_NAMESPACE:-}" "${PORTAL_BLUE_GREEN_PHASE:-}" >>"$PORTAL_TEST_LOG"
 if [[ "${1:-}" == list ]]; then
-  if [[ -z "${FAKE_HELM_RELEASE_ROWS:-}" ]]; then
-    printf '[]\n'
-  else
-    read -r name namespace <<<"$FAKE_HELM_RELEASE_ROWS"
-    filter=''
-    for argument in "$@"; do
-      if [[ "$argument" == ^*'$' ]]; then
-        filter="$argument"
-      fi
-    done
-    if [[ "$filter" == "^${name}$" ]]; then
-      printf '[{"name":"%s","namespace":"%s"}]\n' "$name" "$namespace"
-    else
-      printf '[]\n'
+  case "${FAKE_HELM_MODE:-rows}" in
+    fail)
+      echo "simulated helm failure" >&2
+      exit 42
+      ;;
+    malformed)
+      printf 'not-json\n'
+      exit 0
+      ;;
+    non-list)
+      printf '{"name":"not-a-list"}\n'
+      exit 0
+      ;;
+  esac
+
+  filter=''
+  for argument in "$@"; do
+    if [[ "$argument" == ^*'$' ]]; then
+      filter="$argument"
     fi
-  fi
+  done
+  printf '['
+  separator=''
+  while read -r name namespace; do
+    if [[ "$filter" == "^${name}$" ]]; then
+      printf '%s{"name":"%s","namespace":"%s"}' "$separator" "$name" "$namespace"
+      separator=,
+    fi
+  done <<<"${FAKE_HELM_RELEASE_ROWS:-}"
+  printf ']\n'
 fi
 EOF
 
   cat >"$TEST_BIN/kubectl" <<'EOF'
 #!/usr/bin/env bash
 printf 'kubectl|%s|namespace=%s|phase=%s\n' "$*" "${PORTAL_NAMESPACE:-}" "${PORTAL_BLUE_GREEN_PHASE:-}" >>"$PORTAL_TEST_LOG"
-if [[ "${FAKE_LEGACY_DEPLOYMENTS:-}" == *backend* && "${FAKE_LEGACY_DEPLOYMENTS:-}" == *frontend* ]]; then
-  printf 'deployment.apps/backend\ndeployment.apps/frontend\n'
-  exit 0
+ignore_not_found=false
+for argument in "$@"; do
+  if [[ "$argument" == --ignore-not-found ]]; then
+    ignore_not_found=true
+  fi
+done
+if [[ "$ignore_not_found" != true ]]; then
+  echo "kubectl fake requires --ignore-not-found" >&2
+  exit 44
 fi
-exit 1
+if [[ "${FAKE_KUBECTL_MODE:-ok}" == fail ]]; then
+  echo "simulated kubectl failure" >&2
+  exit 43
+fi
+if [[ "${FAKE_LEGACY_DEPLOYMENTS:-}" == *backend* ]]; then
+  printf 'deployment.apps/backend\n'
+fi
+if [[ "${FAKE_LEGACY_DEPLOYMENTS:-}" == *frontend* ]]; then
+  printf 'deployment.apps/frontend\n'
+fi
 EOF
 
   cat >"$TEST_BIN/helmfile" <<'EOF'
@@ -81,7 +111,7 @@ run_deploy() {
     PATH="$TEST_BIN:$PATH" \
       PORTAL_ROOT_DIR="$TEST_ROOT" \
       PORTAL_TEST_LOG="$PORTAL_TEST_LOG" \
-      PORTAL_BLUE_GREEN_PHASE= \
+      PORTAL_BLUE_GREEN_PHASE="$CALLER_PHASE" \
       "$DEPLOY_SCRIPT" "$@" 2>&1
   )"; then
     DEPLOY_STATUS=0
@@ -111,6 +141,8 @@ assert_exit_2() {
 }
 
 assert_fails_before_helmfile() {
+  local expected="$1"
+  shift
   "$@"
   if [[ "$DEPLOY_STATUS" -eq 0 ]]; then
     fail "expected deployment to fail"
@@ -118,7 +150,20 @@ assert_fails_before_helmfile() {
   if grep -q '^helmfile|' "$PORTAL_TEST_LOG"; then
     fail "expected failure before helmfile, got: $(cat "$PORTAL_TEST_LOG")"
   fi
-  assert_output_contains 'support-ticket-portal-dev already exists in namespace other-space; this command relocates one environment and does not create parallel copies'
+  assert_output_contains "$expected"
+}
+
+assert_operational_failure_before_helmfile() {
+  local expected="$1"
+  shift
+  "$@"
+  if [[ "$DEPLOY_STATUS" -eq 0 ]]; then
+    fail "expected deployment to fail"
+  fi
+  if grep -q '^helmfile|' "$PORTAL_TEST_LOG"; then
+    fail "expected operational failure before helmfile, got: $(cat "$PORTAL_TEST_LOG")"
+  fi
+  assert_output_contains "$expected"
 }
 
 assert_phases() {
@@ -152,9 +197,12 @@ assert_no_helm_preflight() {
 }
 
 write_fake_clis
-export FAKE_HELM_RELEASE_ROWS FAKE_LEGACY_DEPLOYMENTS
+export FAKE_HELM_MODE FAKE_HELM_RELEASE_ROWS FAKE_KUBECTL_MODE FAKE_LEGACY_DEPLOYMENTS
 
+CALLER_PHASE=''
+FAKE_HELM_MODE=rows
 FAKE_HELM_RELEASE_ROWS=''
+FAKE_KUBECTL_MODE=ok
 FAKE_LEGACY_DEPLOYMENTS=''
 run_deploy dev info
 assert_log_empty
@@ -166,10 +214,39 @@ assert_output_contains 'Namespace   : team-space'
 assert_exit_2 run_deploy dev sync team-space unexpected-fourth
 
 FAKE_HELM_RELEASE_ROWS='support-ticket-portal-dev other-space'
-assert_fails_before_helmfile run_deploy dev sync team-space
+assert_fails_before_helmfile 'support-ticket-portal-dev already exists in namespace other-space; this command relocates one environment and does not create parallel copies' run_deploy dev sync team-space
 
+FAKE_HELM_RELEASE_ROWS=$'support-ticket-portal-dev team-space\nsupport-ticket-portal-dev other-space'
+assert_fails_before_helmfile 'support-ticket-portal-dev already exists in namespace other-space; this command relocates one environment and does not create parallel copies' run_deploy dev sync team-space
+
+FAKE_HELM_RELEASE_ROWS='support-ticket-portal-dev-traefik other-space'
+assert_fails_before_helmfile 'support-ticket-portal-dev-traefik already exists in namespace other-space; this command relocates one environment and does not create parallel copies' run_deploy dev sync team-space
+
+FAKE_HELM_MODE=fail
+FAKE_HELM_RELEASE_ROWS=''
+assert_operational_failure_before_helmfile 'failed to inspect Helm releases' run_deploy dev sync team-space
+
+FAKE_HELM_MODE=malformed
+assert_operational_failure_before_helmfile 'failed to parse Helm release inventory' run_deploy dev sync team-space
+
+FAKE_HELM_MODE=non-list
+assert_operational_failure_before_helmfile 'failed to parse Helm release inventory' run_deploy dev sync team-space
+
+FAKE_HELM_MODE=rows
 FAKE_HELM_RELEASE_ROWS='support-ticket-portal-dev team-space'
 FAKE_LEGACY_DEPLOYMENTS='backend frontend'
+run_deploy dev sync team-space
+assert_phases migration coexist active
+
+FAKE_KUBECTL_MODE=fail
+assert_operational_failure_before_helmfile 'failed to inspect legacy Deployments' run_deploy dev sync team-space
+
+FAKE_KUBECTL_MODE=ok
+FAKE_LEGACY_DEPLOYMENTS='backend'
+run_deploy dev sync team-space
+assert_phases migration coexist active
+
+FAKE_LEGACY_DEPLOYMENTS='frontend'
 run_deploy dev sync team-space
 assert_phases migration coexist active
 
@@ -179,6 +256,7 @@ assert_phases active
 
 FAKE_LEGACY_DEPLOYMENTS='backend frontend'
 FAKE_HELM_RELEASE_ROWS='support-ticket-portal-dev other-space'
+CALLER_PHASE=migration
 run_deploy dev diff team-space
 if [[ "$DEPLOY_STATUS" -ne 0 ]]; then
   fail "diff must warn without failing, got exit $DEPLOY_STATUS"
@@ -191,6 +269,7 @@ for action in template destroy; do
   assert_single_unphased_helmfile "$action"
   assert_no_helm_preflight "$action"
 done
+CALLER_PHASE=''
 
 if [[ "$FAILURES" -ne 0 ]]; then
   exit 1

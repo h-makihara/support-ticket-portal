@@ -28,21 +28,33 @@ esac
 
 portal_load_secret_env
 portal_require_deploy_secrets
+unset PORTAL_BLUE_GREEN_PHASE
 
 portal_release_conflict_messages() {
   local release inventory namespaces namespace found=1
 
   for release in "$PORTAL_RELEASE" "$PORTAL_TRAEFIK_RELEASE"; do
-    inventory="$(helm list --all-namespaces --all --filter "^${release}$" --output json)"
-    namespaces="$(python3 -c '
+    if ! inventory="$(helm list --all-namespaces --all --filter "^${release}$" --output json 2>&1)"; then
+      echo "failed to inspect Helm releases for $release: $inventory" >&2
+      return 2
+    fi
+    if ! namespaces="$(python3 -c '
 import json
 import sys
 
-for item in json.load(sys.stdin):
+items = json.load(sys.stdin)
+if not isinstance(items, list):
+    raise ValueError("Helm release inventory must be a JSON list")
+for item in items:
+    if not isinstance(item, dict):
+        raise ValueError("Helm release inventory items must be JSON objects")
     namespace = item.get("namespace")
     if isinstance(namespace, str):
         print(namespace)
-' <<<"$inventory")"
+' <<<"$inventory" 2>&1)"; then
+      echo "failed to parse Helm release inventory for $release: $namespaces" >&2
+      return 2
+    fi
     while IFS= read -r namespace; do
       if [[ -n "$namespace" && "$namespace" != "$PORTAL_NAMESPACE" ]]; then
         printf '%s already exists in namespace %s; this command relocates one environment and does not create parallel copies\n' "$release" "$namespace"
@@ -61,12 +73,41 @@ if [[ "$ACTION" == sync || "$ACTION" == diff ]]; then
       exit 1
     fi
     echo "warning: $conflict_messages" >&2
+  else
+    preflight_status=$?
+    if [[ "$preflight_status" -ne 1 ]]; then
+      exit "$preflight_status"
+    fi
   fi
 fi
 
 cd "$ROOT_DIR"
 if [[ "$ACTION" == sync ]]; then
-  if kubectl -n "$PORTAL_NAMESPACE" get deployment backend frontend -o name >/dev/null 2>&1; then
+  if legacy_deployments="$(kubectl -n "$PORTAL_NAMESPACE" get deployment backend frontend -o name --ignore-not-found 2>&1)"; then
+    kubectl_status=0
+  else
+    kubectl_status=$?
+  fi
+  if [[ "$kubectl_status" -ne 0 ]]; then
+    echo "failed to inspect legacy Deployments in namespace $PORTAL_NAMESPACE: $legacy_deployments" >&2
+    exit 1
+  fi
+
+  legacy_backend=false
+  legacy_frontend=false
+  while IFS= read -r deployment; do
+    case "$deployment" in
+      deployment/backend|deployment.apps/backend) legacy_backend=true ;;
+      deployment/frontend|deployment.apps/frontend) legacy_frontend=true ;;
+      '') ;;
+      *)
+        echo "unexpected legacy Deployment response in namespace $PORTAL_NAMESPACE: $deployment" >&2
+        exit 1
+        ;;
+    esac
+  done <<<"$legacy_deployments"
+
+  if [[ "$legacy_backend" == true || "$legacy_frontend" == true ]]; then
     for PORTAL_BLUE_GREEN_PHASE in migration coexist active; do
       export PORTAL_BLUE_GREEN_PHASE
       helmfile --environment "$PORTAL_ENVIRONMENT" sync
