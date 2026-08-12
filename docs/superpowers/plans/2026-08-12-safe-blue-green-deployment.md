@@ -39,15 +39,20 @@
 
 ---
 
-### Task 1: Structural Manifest Contract Tests
+### Task 1: Structural Manifest Contract and Phase-Aware Chart
 
 **Files:**
 - Create: `tests/helm/manifest_assertions.rb`
+- Create: `deploy/chart/templates/_app.tpl`
+- Create: `deploy/chart/templates/frontend-config.yaml`
+- Modify: `deploy/chart/templates/app.yaml`
+- Modify: `deploy/chart/values.yaml`
+- Modify: `helmfile.yaml.gotmpl`
 - Modify: `scripts/validate-helm.sh`
 
 **Interfaces:**
 - Consumes: `helm template support-ticket-portal deploy/chart` output on stdin/file.
-- Produces: executable assertions for `active`, `migration`, and `coexist` manifests.
+- Produces: executable assertions and phase-safe Kubernetes resources with slot-paired Nginx routing.
 
 - [ ] **Step 1: Create a resource-aware failing test**
 
@@ -124,29 +129,7 @@ Expected: FAIL because the chart does not support `blueGreen.phase` and never re
 
 Test `blueGreen.activeSlot=red`, deleted `blueGreen.slots.green`, and `blueGreen.phase=unknown`. Each `helm template` command must exit nonzero and contain its precise validation message.
 
-- [ ] **Step 6: Commit the RED tests**
-
-```bash
-git add tests/helm/manifest_assertions.rb scripts/validate-helm.sh
-git commit -m "test: define safe blue-green manifest contract"
-```
-
----
-
-### Task 2: Phase-Aware Chart and Slot-Paired Routing
-
-**Files:**
-- Create: `deploy/chart/templates/_app.tpl`
-- Create: `deploy/chart/templates/frontend-config.yaml`
-- Modify: `deploy/chart/templates/app.yaml`
-- Modify: `deploy/chart/values.yaml`
-- Modify: `helmfile.yaml.gotmpl`
-
-**Interfaces:**
-- Consumes: `.Values.blueGreen.phase` in `migration|coexist|active`, `.Values.blueGreen.activeSlot`, and the two slot tag maps.
-- Produces: phase-safe Kubernetes resources and slot-paired Nginx routing.
-
-- [ ] **Step 1: Add phase validation and Helmfile injection**
+- [ ] **Step 6: Add phase validation and Helmfile injection**
 
 Add this internal value:
 
@@ -165,7 +148,7 @@ blueGreen:
 
 At template entry, fail unless phase is one of `migration`, `coexist`, `active`; continue validating both required slots and `activeSlot`.
 
-- [ ] **Step 2: Extract shared Deployment renderers**
+- [ ] **Step 7: Extract shared Deployment renderers**
 
 Create `_app.tpl` definitions `portal.backendDeployment` and `portal.frontendDeployment` accepting a dict with `root`, `name`, `slot`, `backendTag`, `frontendTag`, and `legacy`.
 
@@ -184,7 +167,7 @@ For `legacy: false`:
 
 Keep all existing Backend environment variables, probes, resources, imagePullSecrets, observability sidecar, checksums, and volume definitions unchanged.
 
-- [ ] **Step 3: Render phase-specific Services and Deployments**
+- [ ] **Step 8: Render phase-specific Services and Deployments**
 
 Refactor `app.yaml` so:
 
@@ -194,7 +177,7 @@ Refactor `app.yaml` so:
 
 Slot Services must select name + instance + matching slot. Stable Service names remain `frontend` and `backend`.
 
-- [ ] **Step 4: Generate per-slot Nginx ConfigMaps**
+- [ ] **Step 9: Generate per-slot Nginx ConfigMaps**
 
 Create `frontend-config.yaml` for coexist/active phases. Each `default.conf` preserves the existing SPA settings and headers, with only this slot-specific upstream change:
 
@@ -211,7 +194,7 @@ location /api/ {
 
 Add a checksum annotation of the rendered slot config to each slot Frontend Pod template.
 
-- [ ] **Step 5: Run structural tests and verify GREEN**
+- [ ] **Step 10: Run structural tests and verify GREEN**
 
 Run:
 
@@ -224,11 +207,11 @@ helm lint deploy/chart --set secrets.redmineApiKey=x --set secrets.redmineSecret
 
 Expected: all commands exit 0; invalid phase/slot subtests still prove nonzero rendering.
 
-- [ ] **Step 6: Refactor duplicate YAML while tests remain green**
+- [ ] **Step 11: Refactor duplicate YAML while tests remain green**
 
 Ensure container definitions exist only in `_app.tpl`, phase orchestration only in `app.yaml`, and Nginx config only in `frontend-config.yaml`. Re-run the commands from Step 5.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add deploy/chart/templates/_app.tpl deploy/chart/templates/frontend-config.yaml deploy/chart/templates/app.yaml deploy/chart/values.yaml helmfile.yaml.gotmpl tests/helm/manifest_assertions.rb
@@ -237,7 +220,7 @@ git commit -m "feat: pair blue-green frontend and backend slots"
 
 ---
 
-### Task 3: Safe Deploy State Machine and Namespace Collision Guard
+### Task 2: Safe Deploy State Machine and Namespace Collision Guard
 
 **Files:**
 - Create: `tests/helm/test_deploy_script.sh`
@@ -350,7 +333,7 @@ git commit -m "fix: migrate legacy Helm releases without endpoint loss"
 
 ---
 
-### Task 4: Namespace- and Slot-Aware E2E
+### Task 3: Namespace- and Slot-Aware E2E
 
 **Files:**
 - Create: `tests/helm/test_e2e_script.sh`
@@ -424,7 +407,7 @@ git commit -m "test: verify inactive blue-green slots end to end"
 
 ---
 
-### Task 5: Operator Documentation and Full Validation
+### Task 4: Operator Documentation and Full Validation
 
 **Files:**
 - Modify: `scripts/validate-helm.sh`
@@ -435,7 +418,7 @@ git commit -m "test: verify inactive blue-green slots end to end"
 - Modify: `Makefile`
 
 **Interfaces:**
-- Consumes: behavior delivered in Tasks 1–4.
+- Consumes: behavior delivered in Tasks 1–3.
 - Produces: one validation entry point and accurate operator runbooks.
 
 - [ ] **Step 1: Wire focused tests into validation**
