@@ -115,6 +115,12 @@ exec "$(dirname "$0")/npm" "$@"
 EOF
   cat >"$FAKE_BIN/sleep" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${1:-}" == "1" ]]; then
+  for _ in {1..100}; do
+    [[ -s "$FAKE_PORT_FORWARD_PID_FILE" ]] && exit 0
+    /bin/sleep 0.01
+  done
+fi
 exit 0
 EOF
   chmod +x "$FAKE_BIN/curl" "$FAKE_BIN/kubectl" "$FAKE_BIN/npm" "$FAKE_BIN/npx" "$FAKE_BIN/sleep"
@@ -138,7 +144,7 @@ run_e2e dev --namespace team-space e2e/faq.spec.ts
 assert_namespace_is team-space
 assert_stable_service_fallback 'service/frontend'
 
-FAKE_KUBECTL_INIT_DELAY=0.05 run_e2e dev --namespace team-space e2e/faq.spec.ts
+FAKE_KUBECTL_INIT_DELAY=0.2 run_e2e dev --namespace team-space e2e/faq.spec.ts
 assert_stable_service_fallback 'service/frontend'
 
 assert_exit_2 run_e2e dev --slot red
