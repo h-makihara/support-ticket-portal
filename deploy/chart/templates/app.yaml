@@ -39,6 +39,12 @@ spec:
       port: {{ if eq $name "backend" }}8000{{ else }}80{{ end }}
 {{- end }}
 
+{{- if ne $phase "migration" }}
+{{- range $slot := list "blue" "green" }}
+{{ include "portal.frontendConfigMap" (dict "root" $root "slot" $slot) }}
+{{- end }}
+{{- end }}
+
 {{- if eq $phase "migration" }}
 ---
 {{ include "portal.backendDeployment" (dict "root" $root "name" "backend" "slot" "blue" "backendTag" $root.Values.images.backend.tag "frontendTag" $root.Values.images.frontend.tag "legacy" true) }}

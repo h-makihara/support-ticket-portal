@@ -21,18 +21,18 @@ server {
 }
 {{- end }}
 
-{{- if ne .Values.blueGreen.phase "migration" }}
-{{- range $slot := list "blue" "green" }}
+{{- define "portal.frontendConfigMap" -}}
+{{- $root := .root -}}
+{{- $slot := .slot -}}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: frontend-{{ $slot }}-nginx
   labels:
-    {{- include "portal.labels" $ | nindent 4 }}
+    {{- include "portal.labels" $root | nindent 4 }}
     app.kubernetes.io/slot: {{ $slot }}
 data:
   default.conf: |
 {{ include "portal.frontendConfig" (dict "slot" $slot) | indent 4 }}
-{{- end }}
 {{- end }}
