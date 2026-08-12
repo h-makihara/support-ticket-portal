@@ -62,6 +62,8 @@ portal_select_environment() {
 
   PORTAL_ENVIRONMENT="$environment"
   PORTAL_NAMESPACE="${namespace:-support-ticket-portal-$environment}"
+  PORTAL_RELEASE="support-ticket-portal-$environment"
+  PORTAL_TRAEFIK_RELEASE="$PORTAL_RELEASE-traefik"
   if [[ ! "$PORTAL_NAMESPACE" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ || ${#PORTAL_NAMESPACE} -gt 63 ]]; then
     echo "namespace must be a valid Kubernetes DNS label (lowercase, max 63 characters): $PORTAL_NAMESPACE" >&2
     return 2
@@ -105,6 +107,10 @@ portal_select_environment() {
   PORTAL_TEST_ADMIN_USERNAME="$environment-admin"
   PORTAL_TEST_SUPPORT_USERNAME="$environment-support"
   PORTAL_TEST_SALES_USERNAME="$environment-sales"
+}
+
+portal_usage_deploy() {
+  echo "usage: helmfile-deploy.sh <environment> [sync|diff|template|destroy|info] [namespace]"
 }
 
 portal_load_secret_env() {
