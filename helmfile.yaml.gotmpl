@@ -44,6 +44,9 @@ releases:
             ingressClass: {{ .Values.traefik.bundledIngressClass | quote }}
             namespaces:
               - {{ env "PORTAL_NAMESPACE" | default (printf "support-ticket-portal-%s" .Environment.Name) | quote }}
+              {{- range (.Values.traefik.additionalNamespaces | default (list)) }}
+              - {{ . | quote }}
+              {{- end }}
         rbac:
           enabled: true
           # IngressClass is cluster-scoped, so the controller needs ClusterRole access.

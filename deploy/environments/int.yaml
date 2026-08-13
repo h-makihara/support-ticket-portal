@@ -3,6 +3,8 @@ traefik:
   bundledIngressClass: traefik-int
   externalIngressClass: traefik
   serviceType: LoadBalancer
+  additionalNamespaces:
+    - otel-lgtm-int
 
 backendIngress:
   enabled: true
