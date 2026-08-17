@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type SubmitEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { AuthUser, createTicket, getTicketPriorityOptions, TicketPriorityOption } from '../api/client'
 import { normalizePriorityName } from '../priority'
@@ -26,7 +26,7 @@ export function TicketCreate({ user }: { user: AuthUser }) {
       .catch(e => setError(e instanceof Error ? e.message : '優先度設定の取得に失敗しました'))
   }, [])
 
-  const handleSubmit = async (e: Event) => {
+  const handleSubmit = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!subject.trim() || !description.trim() || priority === null) {
       setError(priority === null ? '優先度を選択してください' : '件名と本文は必須です')

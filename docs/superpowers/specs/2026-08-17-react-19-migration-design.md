@@ -2,7 +2,7 @@
 
 ## Goal
 
-Adopt React 19 for the frontend while preserving the application's existing behavior and keeping the migration scope limited to React-related dependencies and documentation.
+Adopt React 19 for the frontend while preserving the application's existing behavior and keeping the migration scope limited to React-related dependencies, documentation, and the minimal type-checking compatibility fixes revealed during verification.
 
 ## Changes
 
@@ -10,6 +10,8 @@ Adopt React 19 for the frontend while preserving the application's existing beha
 - Update `@types/react` and `@types/react-dom` to their React 19 release lines so TypeScript uses matching APIs.
 - Regenerate `frontend/package-lock.json` with the repository's declared npm version.
 - Update the root README technology summary from React 18 to React 19.
+- Update TypeScript to the smallest stable release line that supports the existing compiler options.
+- Add Vite's standard client declarations and use React 19's submit event type so explicit type checking succeeds without changing runtime behavior.
 - Avoid unrelated dependency upgrades and application refactoring.
 
 ## Compatibility Strategy
@@ -32,4 +34,4 @@ Success means:
 
 ## Testing Approach
 
-This migration changes dependency metadata and documentation rather than introducing application behavior. A new failing application test would not meaningfully prove the dependency version, so implementation will use the existing behavioral tests plus dependency-version inspection, TypeScript validation, and a production build instead of adding a synthetic TDD test.
+This migration changes dependency metadata, documentation, and type-only compatibility declarations rather than introducing application behavior. A new failing application test would not meaningfully prove the dependency version, so implementation will use the existing behavioral tests plus dependency-version inspection, red-green TypeScript validation, and a production build instead of adding a synthetic runtime test.

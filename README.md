@@ -19,7 +19,7 @@ Redmine をチケット基盤として利用する、社内問い合わせ向け
 
 | コンポーネント | 技術 | ローカル URL |
 |---|---|---|
-| Frontend | React 18 / TypeScript / Vite / nginx | http://localhost:3001 |
+| Frontend | React 19 / TypeScript / Vite / nginx | http://localhost:3001 |
 | Backend | Python 3.12 / FastAPI | http://localhost:8000 |
 | Redmine | Redmine 6.1 | http://localhost:3000 |
 | Session store | Redis 7.4 | コンテナ内部のみ |
