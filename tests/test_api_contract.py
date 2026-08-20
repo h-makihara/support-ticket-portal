@@ -27,3 +27,22 @@ def test_session_output_cannot_expose_redmine_credentials():
     serialized = str(schemas["AuthSessionOutput"])
     assert "redmine_api_key" not in serialized
     assert "password" not in serialized
+
+
+def test_ticket_contract_uses_tracker_keys_without_legacy_requirement_fields():
+    schemas = app.openapi()["components"]["schemas"]
+    create = schemas["CreateTicketInput"]
+    output = schemas["TicketOutput"]
+    update = schemas["UpdateCustomFieldsInput"]
+
+    assert "tracker" in create["required"]
+    assert create["properties"]["tracker"]["enum"] == [
+        "inquiry",
+        "report",
+        "customer_visit",
+    ]
+    assert {"tracker", "tracker_name"} <= set(output["required"])
+    for schema in (create, output, update):
+        assert "report_required" not in schema["properties"]
+        assert "customer_visit_required" not in schema["properties"]
+    assert "tracker_id" not in create["properties"]

@@ -48,17 +48,14 @@ from backend.application.schemas import (
 )
 from backend.application.ports import SessionRepository
 from backend.application.presenters.ticket import ticket_to_output
+from backend.domain.models.ticket import TRACKER_NAMES, TrackerKey
 from backend.domain.services.ticket_policy import (
     AUTHOR_REASSIGNMENT_FIELDS,
-    PRIORITY_ESCALATION_FIELDS,
     ROLE_ADMIN,
     ROLE_SALES,
     ROLE_SUPPORT,
-    UnknownPriorityError,
-    next_priority_id,
 )
 from backend.infrastructure.redmine.mappers import (
-    issue_custom_fields,
     issue_to_ticket,
     redmine_bool,
 )
@@ -174,7 +171,6 @@ HTTPXClientInstrumentor().instrument()
 REDMINE_BASE_URL = os.getenv("REDMINE_BASE_URL", "http://redmine:3000")
 REDMINE_API_KEY = os.getenv("REDMINE_API_KEY", "")
 REDMINE_PROJECT_ID = os.getenv("REDMINE_PROJECT_ID", "")
-REDMINE_TRACKER_ID = os.getenv("REDMINE_TRACKER_ID", "")
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "session_id")
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "true").lower() in ("1", "true", "yes")
@@ -184,8 +180,6 @@ if not REDMINE_API_KEY:
     raise RuntimeError("REDMINE_API_KEY must be set")
 if not REDMINE_PROJECT_ID:
     raise RuntimeError("REDMINE_PROJECT_ID must be set")
-if not REDMINE_TRACKER_ID:
-    raise RuntimeError("REDMINE_TRACKER_ID must be set")
 
 HEADERS = {"X-Redmine-API-Key": REDMINE_API_KEY, "Content-Type": "application/json"}
 session_store = SessionStore(REDIS_URL)
@@ -206,9 +200,7 @@ _ROLE_BY_REDMINE_NAME = {
 
 CUSTOM_FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "customer_id": {"name": "顧客ID", "label": "顧客ID", "boolean": False, "support_only": False},
-    "report_required": {"name": "報告書要否", "label": "報告書が必要", "boolean": True, "support_only": False},
     "report_delivered": {"name": "報告書渡し済み", "label": "報告書を渡した", "boolean": True, "support_only": True},
-    "customer_visit_required": {"name": "客先同行要否", "label": "客先同行が必要", "boolean": True, "support_only": False},
     "schedule_assigned": {"name": "予定・担当者アサイン済み", "label": "予定・担当者をアサインした", "boolean": True, "support_only": True},
 }
 
@@ -322,12 +314,6 @@ def _redmine_bool(value: Any) -> bool:
     return redmine_bool(value)
 
 
-def _issue_custom_fields(i: Dict[str, Any], include_support_only: bool) -> Dict[str, Any]:
-    return issue_custom_fields(
-        i, CUSTOM_FIELD_DEFINITIONS, include_support_only=include_support_only
-    )
-
-
 def _issue_to_dict(i: Dict[str, Any], include_support_only: bool = True) -> Dict[str, Any]:
     """Extract common fields from a Redmine issue dict."""
     return ticket_to_output(
@@ -356,18 +342,6 @@ def _latest_support_responder(
         return None
     _, user_id, user = max(support_journals, key=lambda entry: entry[0])
     return {"id": user_id, "name": user.get("name", "")}
-
-
-def _next_priority_id(
-    current_priority_id: int, priorities: List[Dict[str, Any]]
-) -> int:
-    """Return the next Redmine priority by enumeration order, capped at the top."""
-    try:
-        return next_priority_id(
-            current_priority_id, [int(priority["id"]) for priority in priorities]
-        )
-    except UnknownPriorityError:
-        raise HTTPException(status_code=503, detail="現在の優先度設定を解決できません") from None
 
 
 async def _issue_priorities(client: httpx.AsyncClient) -> List[Dict[str, Any]]:
@@ -782,6 +756,24 @@ async def _custom_field_ids() -> Dict[str, int]:
     }
 
 
+async def _tracker_id(tracker: TrackerKey) -> int:
+    async with httpx.AsyncClient(
+        base_url=REDMINE_BASE_URL, headers=HEADERS, timeout=10.0
+    ) as client:
+        response = await client.get("/trackers.json")
+    if response.status_code != 200:
+        raise HTTPException(status_code=503, detail="トラッカー設定を取得できませんでした")
+    expected_name = TRACKER_NAMES[tracker]
+    match = next(
+        (item for item in response.json().get("trackers", [])
+         if item.get("name") == expected_name),
+        None,
+    )
+    if match is None:
+        raise HTTPException(status_code=503, detail=f"トラッカーが設定されていません: {expected_name}")
+    return int(match["id"])
+
+
 def _custom_fields_payload(values: Dict[str, Any], ids: Dict[str, int]) -> List[Dict[str, Any]]:
     payload = []
     for key, value in values.items():
@@ -1111,16 +1103,16 @@ async def create_ticket(
         roles = await _required_user_roles(session.redmine_user_id)
         field_values = {
             "customer_id": ticket_data.customer_id.strip(),
-            "report_required": ticket_data.report_required,
-            "report_delivered": ticket_data.report_delivered if ROLE_SUPPORT in roles else False,
-            "customer_visit_required": ticket_data.customer_visit_required,
-            "schedule_assigned": ticket_data.schedule_assigned if ROLE_SUPPORT in roles else False,
         }
+        if ROLE_SUPPORT in roles and ticket_data.tracker == "report":
+            field_values["report_delivered"] = ticket_data.report_delivered
+        elif ROLE_SUPPORT in roles and ticket_data.tracker == "customer_visit":
+            field_values["schedule_assigned"] = ticket_data.schedule_assigned
         field_ids = await _custom_field_ids()
         payload = {
             "issue": {
                 "project_id": int(REDMINE_PROJECT_ID),
-                "tracker_id": int(REDMINE_TRACKER_ID),
+                "tracker_id": await _tracker_id(ticket_data.tracker),
                 "subject": subject,
                 "description": description,
                 "custom_fields": _custom_fields_payload(field_values, field_ids),
@@ -1129,15 +1121,6 @@ async def create_ticket(
         if priority is not None:
             payload["issue"]["priority_id"] = priority
         async with _client(session.redmine_api_key) as c:
-            if (
-                priority is not None
-                and any(
-                    getattr(ticket_data, field) for field in PRIORITY_ESCALATION_FIELDS
-                )
-            ):
-                payload["issue"]["priority_id"] = _next_priority_id(
-                    priority, await _issue_priorities(c)
-                )
             r = await c.post("/issues.json", json=payload)
             span.set_attribute("redmine.status", r.status_code)
             if r.status_code != 201:
@@ -1374,14 +1357,11 @@ async def update_custom_fields(
     field_ids = await _custom_field_ids()
     payload = {"issue": {"custom_fields": _custom_fields_payload(values, field_ids)}}
     async with _client(session.redmine_api_key) as client:
-        escalates_priority = any(
-            values.get(key) is True for key in PRIORITY_ESCALATION_FIELDS
-        )
         reassigns_to_author = any(
             values.get(key) is True for key in AUTHOR_REASSIGNMENT_FIELDS
         )
         current_issue = None
-        if escalates_priority or reassigns_to_author:
+        if AUTHOR_REASSIGNMENT_FIELDS.intersection(values):
             current_response = await client.get(f"/issues/{ticket_id}.json")
             if current_response.status_code != 200:
                 return JSONResponse(
@@ -1389,27 +1369,18 @@ async def update_custom_fields(
                     content={"detail": current_response.text},
                 )
             current_issue = current_response.json()["issue"]
-
-        if escalates_priority and current_issue is not None:
-            waiting_status_id = _resolve_status_id("open")
-            if waiting_status_id is None:
-                raise HTTPException(
-                    status_code=503,
-                    detail="対応待ちステータスが設定されていません",
-                )
-            payload["issue"]["status_id"] = waiting_status_id
-            payload["issue"]["assigned_to_id"] = ""
-
-            current_fields = _issue_custom_fields(current_issue, include_support_only=False)
-            newly_checked = any(
-                values.get(key) is True and not current_fields.get(key, False)
-                for key in PRIORITY_ESCALATION_FIELDS
-            )
-            if newly_checked:
-                current_priority = int(current_issue["priority"]["id"])
-                payload["issue"]["priority_id"] = _next_priority_id(
-                    current_priority, await _issue_priorities(client)
-                )
+            tracker_name = current_issue["tracker"]["name"]
+            expected_trackers = {
+                "report_delivered": "報告書",
+                "schedule_assigned": "客先同行",
+            }
+            for field in AUTHOR_REASSIGNMENT_FIELDS.intersection(values):
+                expected_tracker = expected_trackers[field]
+                if tracker_name != expected_tracker:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"{field} は{expected_tracker}トラッカーでのみ更新できます",
+                    )
 
         if reassigns_to_author and current_issue is not None:
             author = current_issue.get("author")

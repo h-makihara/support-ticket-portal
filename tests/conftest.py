@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("REDMINE_BASE_URL", "http://test-redmine:3000")
 os.environ.setdefault("REDMINE_API_KEY", "test_api_key_12345")
 os.environ.setdefault("REDMINE_PROJECT_ID", "99")
-os.environ.setdefault("REDMINE_TRACKER_ID", "4")
 
 # Import after env vars are set.
 from backend.app import app, get_session_store, _status_by_id, _status_by_key, _status_by_name
@@ -60,9 +59,9 @@ MOCK_STATUSES: List[Dict[str, Any]] = [
 ]
 
 MOCK_TRACKERS: List[Dict[str, Any]] = [
-    {"id": 1, "name": "Bug"},
-    {"id": 2, "name": "Feature"},
     {"id": 3, "name": "問い合わせ"},
+    {"id": 4, "name": "報告書"},
+    {"id": 5, "name": "客先同行"},
 ]
 
 MOCK_TICKET_CREATED: Dict[str, Any] = {
@@ -70,6 +69,7 @@ MOCK_TICKET_CREATED: Dict[str, Any] = {
         "id": 100,
         "subject": "テスト件名",
         "description": "テスト本文",
+        "tracker": {"id": 4, "name": "報告書"},
         "status": {"id": 1, "name": "対応待ち"},
         "priority": {"id": 3, "name": "Normal"},
         "created_on": "2024-01-01T00:00:00Z",
@@ -82,6 +82,7 @@ MOCK_TICKET_DETAIL: Dict[str, Any] = {
         "id": 100,
         "subject": "テスト件名",
         "description": "テスト本文",
+        "tracker": {"id": 4, "name": "報告書"},
         "status": {"id": 2, "name": "対応中"},
         "priority": {"id": 3, "name": "Normal"},
         "author": {"id": 8, "name": "Sales User"},
@@ -90,10 +91,7 @@ MOCK_TICKET_DETAIL: Dict[str, Any] = {
         "updated_on": "2024-01-02T10:00:00Z",
         "custom_fields": [
             {"id": 11, "name": "顧客ID", "value": "C-100"},
-            {"id": 12, "name": "報告書要否", "value": "1"},
             {"id": 13, "name": "報告書渡し済み", "value": "0"},
-            {"id": 14, "name": "客先同行要否", "value": "0"},
-            {"id": 15, "name": "予定・担当者アサイン済み", "value": "0"},
         ],
         "journals": [
             {
@@ -133,7 +131,6 @@ MOCK_TICKET_DETAIL: Dict[str, Any] = {
                 "user": {"id": 7, "name": "Test User"},
                 "created_on": "2024-01-02T11:00:00Z",
                 "details": [
-                    {"property": "cf", "name": "12", "old_value": "0", "new_value": "1"},
                     {"property": "cf", "name": "13", "old_value": "0", "new_value": "1"},
                 ],
             },
@@ -147,6 +144,7 @@ MOCK_TICKET_LIST: Dict[str, Any] = {
             "id": 100,
             "subject": "チケットA",
             "description": "説明A",
+            "tracker": {"id": 4, "name": "報告書"},
             "author": {"id": 8, "name": "Sales User"},
             "status": {"id": 1, "name": "対応待ち"},
             "priority": {"id": 2, "name": "High"},
@@ -157,6 +155,7 @@ MOCK_TICKET_LIST: Dict[str, Any] = {
             "id": 101,
             "subject": "チケットB",
             "description": "説明B",
+            "tracker": {"id": 5, "name": "客先同行"},
             "author": {"id": 7, "name": "Test User"},
             "status": {"id": 2, "name": "対応中"},
             "priority": {"id": 3, "name": "Normal"},
@@ -193,9 +192,7 @@ def mock_redmine_api():
         respx.get("http://test-redmine:3000/custom_fields.json").mock(
             return_value=httpx.Response(200, json={"custom_fields": [
                 {"id": 11, "name": "顧客ID"},
-                {"id": 12, "name": "報告書要否"},
                 {"id": 13, "name": "報告書渡し済み"},
-                {"id": 14, "name": "客先同行要否"},
                 {"id": 15, "name": "予定・担当者アサイン済み"},
             ]})
         )
@@ -268,7 +265,14 @@ def mock_redmine_api():
             ticket_id = int(request.url.path.split("/")[-1].removesuffix(".json"))
             if ticket_id in detail_failures:
                 raise httpx.ConnectError("detail unavailable", request=request)
-            return httpx.Response(200, json=current_ticket_detail)
+            detail = deepcopy(current_ticket_detail)
+            if ticket_id == 101:
+                detail["issue"]["tracker"] = {"id": 5, "name": "客先同行"}
+                detail["issue"]["custom_fields"] = [
+                    {"id": 11, "name": "顧客ID", "value": "C-101"},
+                    {"id": 15, "name": "予定・担当者アサイン済み", "value": "0"},
+                ]
+            return httpx.Response(200, json=detail)
 
         respx.get(url__regex=r"http://test-redmine:3000/issues/\d+\.json").mock(
             side_effect=detail_handler

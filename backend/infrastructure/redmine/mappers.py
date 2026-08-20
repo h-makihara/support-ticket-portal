@@ -2,7 +2,12 @@
 
 from typing import Any
 
-from backend.domain.models.ticket import Assignee, Ticket, TicketCustomFields
+from backend.domain.models.ticket import (
+    TRACKER_KEYS_BY_NAME,
+    Assignee,
+    Ticket,
+    TicketCustomFields,
+)
 
 
 def redmine_bool(value: Any) -> bool:
@@ -29,8 +34,10 @@ def issue_custom_fields(
 def issue_to_ticket(issue: dict[str, Any], definitions: dict[str, dict[str, Any]]) -> Ticket:
     assigned = issue.get("assigned_to")
     fields = issue_custom_fields(issue, definitions, include_support_only=True)
+    tracker_name = issue["tracker"]["name"]
     return Ticket(
-        id=int(issue["id"]), subject=issue.get("subject", ""), description=issue.get("description", ""),
+        id=int(issue["id"]), tracker=TRACKER_KEYS_BY_NAME[tracker_name], tracker_name=tracker_name,
+        subject=issue.get("subject", ""), description=issue.get("description", ""),
         status=issue["status"]["name"], priority=int(issue["priority"]["id"]),
         priority_name=issue["priority"].get("name", ""),
         assignee=Assignee(id=int(assigned["id"]), name=assigned.get("name", "")) if assigned else None,

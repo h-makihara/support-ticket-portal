@@ -19,6 +19,7 @@ class TestCreateTicket:
     def test_create_ticket_success(self, client: TestClient):
         """正常系: チケットが正しく作成される"""
         payload = {
+            "tracker": "inquiry",
             "subject": "新規問い合わせ",
             "description": "詳細な説明です",
             "priority": 2,
@@ -34,18 +35,89 @@ class TestCreateTicket:
             for call in respx.calls
             if call.request.method == "POST" and call.request.url.path == "/issues.json"
         )
-        assert json.loads(request.content)["issue"]["tracker_id"] == 4
+        assert json.loads(request.content)["issue"]["tracker_id"] == 3
         assert json.loads(request.content)["issue"]["custom_fields"] == [
             {"id": 11, "value": ""},
-            {"id": 12, "value": "0"},
-            {"id": 13, "value": "0"},
-            {"id": 14, "value": "0"},
-            {"id": 15, "value": "0"},
         ]
+
+    @pytest.mark.parametrize(("tracker", "tracker_id"), [
+        ("inquiry", 3),
+        ("report", 4),
+        ("customer_visit", 5),
+    ])
+    def test_create_ticket_maps_allowed_tracker_key(
+        self, client: TestClient, tracker: str, tracker_id: int
+    ):
+        response = client.post("/tickets", json={
+            "tracker": tracker,
+            "subject": "新規依頼",
+            "description": "詳細",
+        })
+        assert response.status_code == 200
+        request = next(
+            call.request for call in respx.calls
+            if call.request.method == "POST" and call.request.url.path == "/issues.json"
+        )
+        assert json.loads(request.content)["issue"]["tracker_id"] == tracker_id
+
+    @pytest.mark.parametrize("payload", [
+        {"subject": "件名", "description": "本文"},
+        {"tracker": "Bug", "subject": "件名", "description": "本文"},
+    ])
+    def test_create_ticket_rejects_missing_or_unknown_tracker(
+        self, client: TestClient, payload: dict[str, str]
+    ):
+        assert client.post("/tickets", json=payload).status_code == 422
+
+    def test_create_ticket_rejects_tracker_missing_from_redmine(self, client: TestClient):
+        respx.get("http://test-redmine:3000/trackers.json").mock(
+            return_value=app_module.httpx.Response(
+                200, json={"trackers": [{"id": 3, "name": "問い合わせ"}]}
+            )
+        )
+
+        response = client.post("/tickets", json={
+            "tracker": "report",
+            "subject": "件名",
+            "description": "本文",
+        })
+
+        assert response.status_code == 503
+        assert "報告書" in response.json()["detail"]
+
+    @pytest.mark.parametrize(("tracker", "expected_fields"), [
+        ("inquiry", [{"id": 11, "value": "C-100"}]),
+        ("report", [
+            {"id": 11, "value": "C-100"},
+            {"id": 13, "value": "1"},
+        ]),
+        ("customer_visit", [
+            {"id": 11, "value": "C-100"},
+            {"id": 15, "value": "1"},
+        ]),
+    ])
+    def test_create_ticket_sends_only_tracker_specific_custom_fields(
+        self, client: TestClient, tracker: str, expected_fields: list[dict[str, object]]
+    ):
+        response = client.post("/tickets", json={
+            "tracker": tracker,
+            "subject": "件名",
+            "description": "本文",
+            "customer_id": "C-100",
+            "report_delivered": True,
+            "schedule_assigned": True,
+        })
+        assert response.status_code == 200
+        request = next(
+            call.request for call in respx.calls
+            if call.request.method == "POST" and call.request.url.path == "/issues.json"
+        )
+        assert json.loads(request.content)["issue"]["custom_fields"] == expected_fields
 
     def test_create_ticket_missing_subject(self, client: TestClient):
         """異常系: subject が省略されていると422エラー"""
         payload = {
+            "tracker": "inquiry",
             "description": "説明だけ",
         }
         resp = client.post("/tickets", json=payload)
@@ -54,6 +126,7 @@ class TestCreateTicket:
     def test_create_ticket_missing_description(self, client: TestClient):
         """異常系: description が省略されていると422エラー"""
         payload = {
+            "tracker": "inquiry",
             "subject": "件名だけ",
         }
         resp = client.post("/tickets", json=payload)
@@ -62,75 +135,9 @@ class TestCreateTicket:
     def test_create_ticket_rejects_whitespace_only_fields(self, client: TestClient):
         resp = client.post(
             "/tickets",
-            json={"subject": "  ", "description": "\n\t"},
+            json={"tracker": "inquiry", "subject": "  ", "description": "\n\t"},
         )
         assert resp.status_code == 422
-
-    def test_create_ticket_maps_client_tracker_id_to_inquiry_tracker(self, client: TestClient):
-        """Bug の tracker_id が指定されても問い合わせへマッピングする。"""
-        payload = {
-            "subject": "テスト",
-            "description": "テスト本文",
-            "tracker_id": 3,
-        }
-        resp = client.post("/tickets", json=payload)
-        assert resp.status_code == 200
-        request = next(
-            call.request
-            for call in respx.calls
-            if call.request.method == "POST" and call.request.url.path == "/issues.json"
-        )
-        assert json.loads(request.content)["issue"]["tracker_id"] == 4
-
-    def test_sales_requirement_raises_priority_one_level(self, client: TestClient):
-        store = app.dependency_overrides[get_session_store]()
-        store.sessions["test-session"] = replace(
-            store.sessions["test-session"], redmine_user_id=8
-        )
-
-        response = client.post("/tickets", json={
-            "subject": "報告書が必要な問い合わせ",
-            "description": "詳細",
-            "priority": 2,
-            "report_required": True,
-        })
-
-        assert response.status_code == 200
-        request = next(
-            call.request for call in respx.calls
-            if call.request.method == "POST" and call.request.url.path == "/issues.json"
-        )
-        assert json.loads(request.content)["issue"]["priority_id"] == 3
-
-    def test_support_requirement_also_raises_priority_one_level(self, client: TestClient):
-        response = client.post("/tickets", json={
-            "subject": "客先同行が必要な問い合わせ",
-            "description": "詳細",
-            "priority": 2,
-            "customer_visit_required": True,
-        })
-
-        assert response.status_code == 200
-        request = next(
-            call.request for call in respx.calls
-            if call.request.method == "POST" and call.request.url.path == "/issues.json"
-        )
-        assert json.loads(request.content)["issue"]["priority_id"] == 3
-
-    def test_requirement_priority_stays_at_redmine_maximum(self, client: TestClient):
-        response = client.post("/tickets", json={
-            "subject": "最優先の問い合わせ",
-            "description": "詳細",
-            "priority": 5,
-            "report_required": True,
-        })
-
-        assert response.status_code == 200
-        request = next(
-            call.request for call in respx.calls
-            if call.request.method == "POST" and call.request.url.path == "/issues.json"
-        )
-        assert json.loads(request.content)["issue"]["priority_id"] == 5
 
     def test_priority_options_come_from_redmine(self, client: TestClient):
         response = client.get("/priority/options")
@@ -155,6 +162,14 @@ class TestListTickets:
         assert "pagination" in data
         assert len(data["tickets"]) == 2
         assert data["pagination"]["total_count"] == 2
+        assert [(ticket["tracker"], ticket["tracker_name"]) for ticket in data["tickets"]] == [
+            ("report", "報告書"),
+            ("customer_visit", "客先同行"),
+        ]
+        assert "report_delivered" in data["tickets"][0]
+        assert "schedule_assigned" not in data["tickets"][0]
+        assert "report_delivered" not in data["tickets"][1]
+        assert "schedule_assigned" in data["tickets"][1]
         issues_request = next(
             call.request for call in respx.calls
             if call.request.url.path == "/issues.json"
@@ -260,6 +275,12 @@ class TestGetTicket:
         assert data["id"] == 100
         assert data["subject"] == "テスト件名"
         assert data["assignee"] == {"id": 7, "name": "Test User"}
+        assert data["tracker"] == "report"
+        assert data["tracker_name"] == "報告書"
+        assert "report_required" not in data
+        assert "customer_visit_required" not in data
+        assert data["report_delivered"] is False
+        assert "schedule_assigned" not in data
         assert "audit_log" in data
 
     def test_get_ticket_has_journals(self, client: TestClient):
@@ -282,15 +303,9 @@ class TestGetTicket:
             change
             for entry in client.get("/tickets/100").json()["audit_log"]
             for change in entry["changes"]
-            if change["field"] in ("report_required", "report_delivered")
+            if change["field"] == "report_delivered"
         ]
         assert changes == [
-            {
-                "field": "report_required",
-                "display_field": "報告書が必要",
-                "old_value": "いいえ",
-                "new_value": "はい",
-            },
             {
                 "field": "report_delivered",
                 "display_field": "報告書を渡した",
@@ -371,9 +386,8 @@ class TestCustomFields:
     def test_support_sees_and_updates_all_fields(self, client: TestClient):
         detail = client.get("/tickets/100")
         assert detail.json()["customer_id"] == "C-100"
-        assert detail.json()["report_required"] is True
         assert detail.json()["report_delivered"] is False
-        assert detail.json()["schedule_assigned"] is False
+        assert "schedule_assigned" not in detail.json()
 
         response = client.patch(
             "/tickets/100/custom-fields",
@@ -389,22 +403,23 @@ class TestCustomFields:
             {"id": 13, "value": "1"},
         ], "status_id": 3, "assigned_to_id": 8}}
 
-    @pytest.mark.parametrize("field_name, field_id", [
-        ("report_delivered", 13),
-        ("schedule_assigned", 15),
+    @pytest.mark.parametrize("ticket_id, field_name, field_id", [
+        (100, "report_delivered", 13),
+        (101, "schedule_assigned", 15),
     ])
     def test_completion_field_assigns_ticket_author(
-        self, client: TestClient, field_name: str, field_id: int
+        self, client: TestClient, ticket_id: int, field_name: str, field_id: int
     ):
         response = client.patch(
-            "/tickets/100/custom-fields",
+            f"/tickets/{ticket_id}/custom-fields",
             json={field_name: True},
         )
 
         assert response.status_code == 200
         update_request = next(
             call.request for call in reversed(respx.calls)
-            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
+            if call.request.method == "PUT"
+            and call.request.url.path == f"/issues/{ticket_id}.json"
         )
         assert json.loads(update_request.content) == {"issue": {
             "custom_fields": [{"id": field_id, "value": "1"}],
@@ -412,24 +427,27 @@ class TestCustomFields:
             "assigned_to_id": 8,
         }}
 
-    def test_completion_field_takes_precedence_over_requirement_field(
-        self, client: TestClient
+    @pytest.mark.parametrize("ticket_id, field_name, expected_tracker", [
+        (100, "schedule_assigned", "客先同行"),
+        (101, "report_delivered", "報告書"),
+    ])
+    def test_completion_field_rejects_mismatched_tracker(
+        self, client: TestClient, ticket_id: int, field_name: str, expected_tracker: str
     ):
+        put_count = sum(call.request.method == "PUT" for call in respx.calls)
+
         response = client.patch(
-            "/tickets/100/custom-fields",
-            json={"report_required": True, "report_delivered": True},
+            f"/tickets/{ticket_id}/custom-fields", json={field_name: True}
         )
 
-        assert response.status_code == 200
-        update_request = next(
-            call.request for call in reversed(respx.calls)
-            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
-        )
-        updated_issue = json.loads(update_request.content)["issue"]
-        assert updated_issue["status_id"] == 3
-        assert updated_issue["assigned_to_id"] == 8
+        assert response.status_code == 422
+        assert expected_tracker in response.json()["detail"]
+        assert sum(call.request.method == "PUT" for call in respx.calls) == put_count
 
-    def test_sales_cannot_see_or_update_support_only_fields(self, client: TestClient):
+    @pytest.mark.parametrize("field_name", ["report_delivered", "schedule_assigned"])
+    def test_sales_cannot_see_or_update_support_only_fields(
+        self, client: TestClient, field_name: str
+    ):
         store = app.dependency_overrides[get_session_store]()
         store.sessions["test-session"] = replace(
             store.sessions["test-session"], redmine_user_id=8
@@ -442,67 +460,12 @@ class TestCustomFields:
             for entry in detail.json()["audit_log"]
             for change in entry["changes"]
         }
-        assert "report_required" in audit_fields
         assert "report_delivered" not in audit_fields
 
         response = client.patch(
-            "/tickets/100/custom-fields", json={"report_delivered": True}
+            "/tickets/100/custom-fields", json={field_name: True}
         )
         assert response.status_code == 403
-
-    def test_sales_new_requirement_raises_existing_ticket_priority(self, client: TestClient):
-        store = app.dependency_overrides[get_session_store]()
-        store.sessions["test-session"] = replace(
-            store.sessions["test-session"], redmine_user_id=8
-        )
-
-        response = client.patch(
-            "/tickets/100/custom-fields",
-            json={"customer_visit_required": True},
-        )
-
-        assert response.status_code == 200
-        update_request = next(
-            call.request for call in reversed(respx.calls)
-            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
-        )
-        assert json.loads(update_request.content) == {"issue": {
-            "custom_fields": [{"id": 14, "value": "1"}],
-            "status_id": 1,
-            "assigned_to_id": "",
-            "priority_id": 4,
-        }}
-
-    def test_support_new_requirement_raises_existing_ticket_priority(self, client: TestClient):
-        response = client.patch(
-            "/tickets/100/custom-fields",
-            json={"customer_visit_required": True},
-        )
-
-        assert response.status_code == 200
-        update_request = next(
-            call.request for call in reversed(respx.calls)
-            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
-        )
-        assert json.loads(update_request.content)["issue"]["priority_id"] == 4
-        assert json.loads(update_request.content)["issue"]["status_id"] == 1
-        assert json.loads(update_request.content)["issue"]["assigned_to_id"] == ""
-
-    def test_existing_requirement_does_not_raise_priority_again(self, client: TestClient):
-        response = client.patch(
-            "/tickets/100/custom-fields",
-            json={"report_required": True},
-        )
-
-        assert response.status_code == 200
-        update_request = next(
-            call.request for call in reversed(respx.calls)
-            if call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
-        )
-        updated_issue = json.loads(update_request.content)["issue"]
-        assert "priority_id" not in updated_issue
-        assert updated_issue["status_id"] == 1
-        assert updated_issue["assigned_to_id"] == ""
 
 class TestAnswerTicket:
     def test_support_user_adds_answer_and_assigns_ticket_author(

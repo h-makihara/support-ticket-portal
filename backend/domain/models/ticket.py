@@ -1,6 +1,16 @@
 """Ticket aggregate values independent of FastAPI and Redmine."""
 
 from dataclasses import dataclass
+from typing import Literal
+
+
+TrackerKey = Literal["inquiry", "report", "customer_visit"]
+TRACKER_NAMES: dict[TrackerKey, str] = {
+    "inquiry": "問い合わせ",
+    "report": "報告書",
+    "customer_visit": "客先同行",
+}
+TRACKER_KEYS_BY_NAME = {name: key for key, name in TRACKER_NAMES.items()}
 
 
 @dataclass(frozen=True)
@@ -12,15 +22,15 @@ class Assignee:
 @dataclass(frozen=True)
 class TicketCustomFields:
     customer_id: str = ""
-    report_required: bool = False
     report_delivered: bool = False
-    customer_visit_required: bool = False
     schedule_assigned: bool = False
 
 
 @dataclass(frozen=True)
 class Ticket:
     id: int
+    tracker: TrackerKey
+    tracker_name: str
     subject: str
     description: str
     status: str

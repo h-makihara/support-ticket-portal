@@ -3,25 +3,22 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from backend.application.schemas.common import PaginationOutput
+from backend.domain.models.ticket import TrackerKey
 
 
 class CreateTicketInput(BaseModel):
+    tracker: TrackerKey
     subject: str = Field(description="件名。空白除去後に必須")
     description: str = Field(description="問い合わせ内容。空白除去後に必須")
     priority: int | None = Field(default=None, description="Redmine優先度ID")
-    tracker_id: int | None = Field(default=None, deprecated=True, description="互換入力。サーバー設定値を使用するため無視される")
     customer_id: str = ""
-    report_required: bool = False
     report_delivered: bool = Field(default=False, description="サポートロールのみ反映")
-    customer_visit_required: bool = False
     schedule_assigned: bool = Field(default=False, description="サポートロールのみ反映")
 
 
 class UpdateCustomFieldsInput(BaseModel):
     customer_id: str | None = None
-    report_required: bool | None = None
     report_delivered: bool | None = None
-    customer_visit_required: bool | None = None
     schedule_assigned: bool | None = None
 
 
@@ -65,6 +62,8 @@ class AuditEntryOutput(BaseModel):
 
 class TicketOutput(BaseModel):
     id: int
+    tracker: TrackerKey
+    tracker_name: str
     subject: str
     description: str
     status: str
@@ -77,9 +76,7 @@ class TicketOutput(BaseModel):
     notes: list[NoteOutput] | None = None
     audit_log: list[AuditEntryOutput] | None = None
     customer_id: str
-    report_required: bool
     report_delivered: bool | None = None
-    customer_visit_required: bool
     schedule_assigned: bool | None = None
 
 

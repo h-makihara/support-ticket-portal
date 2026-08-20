@@ -9,6 +9,8 @@ def ticket_to_output(ticket: Ticket, *, include_support_only: bool) -> dict[str,
     fields = ticket.custom_fields
     result: dict[str, Any] = {
         "id": ticket.id,
+        "tracker": ticket.tracker,
+        "tracker_name": ticket.tracker_name,
         "subject": ticket.subject,
         "description": ticket.description,
         "status": ticket.status,
@@ -18,12 +20,10 @@ def ticket_to_output(ticket: Ticket, *, include_support_only: bool) -> dict[str,
         "created_on": ticket.created_on,
         "updated_on": ticket.updated_on,
         "customer_id": fields.customer_id,
-        "report_required": fields.report_required,
-        "customer_visit_required": fields.customer_visit_required,
     }
     if include_support_only:
-        result.update(
-            report_delivered=fields.report_delivered,
-            schedule_assigned=fields.schedule_assigned,
-        )
+        if ticket.tracker == "report":
+            result["report_delivered"] = fields.report_delivered
+        elif ticket.tracker == "customer_visit":
+            result["schedule_assigned"] = fields.schedule_assigned
     return result

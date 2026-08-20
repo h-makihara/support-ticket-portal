@@ -1,15 +1,11 @@
 """Unit tests for backend helper functions."""
 
-import pytest
-from fastapi import HTTPException
-
 from backend.app import (
     _journals_to_notes,
     _journals_to_audit,
     _issue_to_dict,
     _field_display_name,
     _latest_support_responder,
-    _next_priority_id,
 )
 
 
@@ -22,6 +18,7 @@ class TestIssueToDict:
             "id": 123,
             "subject": "Test Subject",
             "description": "Test Description",
+            "tracker": {"id": 3, "name": "問い合わせ"},
             "status": {"id": 1, "name": "New"},
             "priority": {"id": 3, "name": "Normal"},
             "assigned_to": {"id": 7, "name": "Support Agent"},
@@ -41,6 +38,7 @@ class TestIssueToDict:
             "id": 456,
             "subject": "",
             "description": "",
+            "tracker": {"id": 3, "name": "問い合わせ"},
             "status": {"id": 1, "name": "New"},
             "priority": {"id": 3, "name": "Normal"},
         }
@@ -196,23 +194,23 @@ class TestJournalsToAudit:
             "created_on": "2024-01-01T00:00:00Z",
             "details": [{
                 "property": "cf",
-                "name": "12",
+                "name": "13",
                 "old_value": "0",
                 "new_value": "1",
             }],
         }]
         entries = _journals_to_audit(
             journals,
-            custom_fields={12: {
-                "key": "report_required",
-                "label": "報告書が必要",
+            custom_fields={13: {
+                "key": "report_delivered",
+                "label": "報告書を渡した",
                 "boolean": True,
                 "hidden": False,
             }},
         )
         assert entries[0]["changes"] == [{
-            "field": "report_required",
-            "display_field": "報告書が必要",
+            "field": "report_delivered",
+            "display_field": "報告書を渡した",
             "old_value": "いいえ",
             "new_value": "はい",
         }]
@@ -303,21 +301,3 @@ def test_latest_support_responder_uses_most_recent_support_journal():
         "id": 9,
         "name": "Support B",
     }
-
-
-def test_next_priority_uses_redmine_order_instead_of_incrementing_id():
-    priorities = [
-        {"id": 10, "name": "Low"},
-        {"id": 40, "name": "Normal"},
-        {"id": 90, "name": "High"},
-    ]
-
-    assert _next_priority_id(40, priorities) == 90
-    assert _next_priority_id(90, priorities) == 90
-
-
-def test_next_priority_rejects_an_unknown_current_priority():
-    with pytest.raises(HTTPException) as exc_info:
-        _next_priority_id(999, [{"id": 10}, {"id": 40}])
-
-    assert exc_info.value.status_code == 503
