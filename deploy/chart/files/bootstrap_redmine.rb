@@ -104,21 +104,25 @@ wiki.save!
 sample_faqs = {
   "FAQ_report_request" => [
     "報告書が欲しいです",
+    "チケットを作成（既にやりとりするチケットがある場合は更新）し、報告書が必要にチェックを入れて対応情報を更新してください",
     "報告書チケットを作成し、対応情報を更新してください"
   ],
   "FAQ_customer_visit" => [
     "報告書がわかりにくいので一緒に客先に同行してほしいです",
+    "チケットを作成（既にやりとりするチケットがある場合は更新）し、客先同行が必要にチェックを入れて対応情報を更新してください",
     "客先同行チケットを作成し、対応情報を更新してください"
   ]
 }
-sample_faqs.each do |title, (question, answer)|
-  next if wiki.find_page(title)
+sample_faqs.each do |title, (question, legacy_answer, answer)|
+  content_text = "Q: #{question}\n\nA:\n#{answer}"
+  page = wiki.find_page(title)
+  next if page && page.content&.text != "Q: #{question}\n\nA:\n#{legacy_answer}"
 
-  page = WikiPage.new(wiki: wiki, title: title)
+  page ||= WikiPage.new(wiki: wiki, title: title)
   content = WikiContent.new(
     page: page,
     author: admin,
-    text: "Q: #{question}\n\nA:\n#{answer}"
+    text: content_text
   )
   page.save_with_content(content) || abort("Failed to create sample FAQ #{title}: #{page.errors.full_messages.join(', ')}")
 end
