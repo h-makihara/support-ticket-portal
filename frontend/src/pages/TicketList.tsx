@@ -118,12 +118,13 @@ export function TicketList({ user }: { user: AuthUser }) {
       ) : (
         <>
           <table className="table">
-            <thead><tr><th>ID</th><th>件名</th><th>顧客ID</th><th>ステータス</th><th>優先度</th><th>作成日</th></tr></thead>
+            <thead><tr><th>ID</th><th>件名</th><th>トラッカー</th><th>顧客ID</th><th>ステータス</th><th>優先度</th><th>作成日</th></tr></thead>
             <tbody>
               {tickets.map(ticket => (
                 <tr key={ticket.id}>
                   <td>{ticket.id}</td>
                   <td><Link to={`/tickets/${ticket.id}`}>{ticket.subject}</Link></td>
+                  <td>{ticket.tracker_name}</td>
                   <td>{ticket.customer_id || '-'}</td>
                   <td><span className={`status-badge status-${ticket.status.toLowerCase().replace(/\s+/g, '_')}`}>{ticket.status}</span></td>
                   <td><span className={priorityBadgeClass(ticket)}>{priorityLabel(ticket)}</span></td>

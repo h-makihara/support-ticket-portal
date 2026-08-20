@@ -1,6 +1,6 @@
 import { useEffect, useState, type SubmitEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { AuthUser, createTicket, getTicketPriorityOptions, TicketPriorityOption } from '../api/client'
+import { AuthUser, createTicket, getTicketPriorityOptions, TicketPriorityOption, TrackerKey } from '../api/client'
 import { normalizePriorityName } from '../priority'
 
 export function TicketCreate({ user }: { user: AuthUser }) {
@@ -10,9 +10,8 @@ export function TicketCreate({ user }: { user: AuthUser }) {
   const [priority, setPriority] = useState<number | null>(null)
   const [priorityOptions, setPriorityOptions] = useState<TicketPriorityOption[]>([])
   const [customerId, setCustomerId] = useState('')
-  const [reportRequired, setReportRequired] = useState(false)
+  const [tracker, setTracker] = useState<TrackerKey>('inquiry')
   const [reportDelivered, setReportDelivered] = useState(false)
-  const [customerVisitRequired, setCustomerVisitRequired] = useState(false)
   const [scheduleAssigned, setScheduleAssigned] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -36,12 +35,10 @@ export function TicketCreate({ user }: { user: AuthUser }) {
     setError(null) // Clear previous errors on new submit
     try {
       const ticket = await createTicket({
-        subject, description, priority,
+        tracker, subject, description, priority,
         customer_id: customerId,
-        report_required: reportRequired,
-        report_delivered: reportDelivered,
-        customer_visit_required: customerVisitRequired,
-        schedule_assigned: scheduleAssigned,
+        ...(tracker === 'report' ? { report_delivered: reportDelivered } : {}),
+        ...(tracker === 'customer_visit' ? { schedule_assigned: scheduleAssigned } : {}),
       })
       navigate(`/tickets/${ticket.id}`)
     } catch (e: unknown) {
@@ -69,6 +66,15 @@ export function TicketCreate({ user }: { user: AuthUser }) {
         )}
 
         <form onSubmit={handleSubmit} style={{ marginTop: '1rem' }}>
+          <div className="form-group">
+            <label htmlFor="tracker">トラッカー</label>
+            <select id="tracker" value={tracker} onChange={e => setTracker(e.target.value as TrackerKey)} disabled={loading}>
+              <option value="inquiry">問い合わせ</option>
+              <option value="report">報告書</option>
+              <option value="customer_visit">客先同行</option>
+            </select>
+          </div>
+
           <div className="form-group">
             <label>件名</label>
             <input
@@ -110,19 +116,13 @@ export function TicketCreate({ user }: { user: AuthUser }) {
           </div>
 
           <div className="custom-field-checks">
-            <label><input type="checkbox" checked={reportRequired} onChange={e => setReportRequired(e.target.checked)} disabled={loading} /> 報告書が必要</label>
-            <label><input type="checkbox" checked={customerVisitRequired} onChange={e => setCustomerVisitRequired(e.target.checked)} disabled={loading} /> 客先同行が必要</label>
-            {user.roles.includes('support') && <>
+            {user.roles.includes('support') && tracker === 'report' && (
               <label><input type="checkbox" checked={reportDelivered} onChange={e => setReportDelivered(e.target.checked)} disabled={loading} /> 報告書を渡した</label>
+            )}
+            {user.roles.includes('support') && tracker === 'customer_visit' && (
               <label><input type="checkbox" checked={scheduleAssigned} onChange={e => setScheduleAssigned(e.target.checked)} disabled={loading} /> 予定・担当者をアサインした</label>
-            </>}
+            )}
           </div>
-
-          {(reportRequired || customerVisitRequired) && (
-            <p className="priority-notice" role="status">
-              対応条件が選択されているため、保存時に優先度が1段階上がります。
-            </p>
-          )}
 
           <button className="btn btn-primary" type="submit" disabled={loading || priority === null || !subject.trim() || !description.trim()}>
             {loading ? '作成中...' : '作成する'}

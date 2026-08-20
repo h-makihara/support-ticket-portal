@@ -6,7 +6,18 @@ vi.mock('../api/client', () => ({ getTickets: getTicketsMock }))
 
 import { fetchAllTickets, filterTicketsByStatus } from './TicketList'
 
-const ticket = (id: number, status: string) => ({ id, status } as Ticket)
+const ticket = (id: number, status: string): Ticket => ({
+  id,
+  subject: '',
+  description: '',
+  status,
+  priority: 1,
+  priority_name: '通常',
+  tracker: 'inquiry',
+  tracker_name: '問い合わせ',
+  assignee: null,
+  customer_id: '',
+})
 
 beforeEach(() => getTicketsMock.mockReset())
 

@@ -117,6 +117,7 @@ export function AnswerTicketList() {
               <tr>
                 <th>ID</th>
                 <th>件名</th>
+                <th>トラッカー</th>
                 <th>ステータス</th>
                 <th>優先度</th>
                 <th>対応者</th>
@@ -133,6 +134,7 @@ export function AnswerTicketList() {
                   <td>
                     <Link to={`/tickets/${ticket.id}`}>{ticket.subject}</Link>
                   </td>
+                  <td>{ticket.tracker_name}</td>
                   <td>
                     <span className={`status-badge status-${ticket.status.toLowerCase().replace(/\s+/g, '_')}`}>
                       {ticket.status}

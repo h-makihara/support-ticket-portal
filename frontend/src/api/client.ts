@@ -53,6 +53,8 @@ export interface Ticket {
   status: string
   priority: number
   priority_name: string
+  tracker: TrackerKey
+  tracker_name: string
   assignee: {
     id: number
     name: string
@@ -66,11 +68,11 @@ export interface Ticket {
   notes?: Array<{ body: string; author: string; created_on: string }>
   audit_log?: AuditEntry[]
   customer_id: string
-  report_required: boolean
   report_delivered?: boolean
-  customer_visit_required: boolean
   schedule_assigned?: boolean
 }
+
+export type TrackerKey = 'inquiry' | 'report' | 'customer_visit'
 
 export interface PaginationInfo {
   limit: number
@@ -109,13 +111,11 @@ export async function getTicket(id: number): Promise<Ticket> {
 
 export interface TicketCustomFields {
   customer_id: string
-  report_required: boolean
   report_delivered?: boolean
-  customer_visit_required: boolean
   schedule_assigned?: boolean
 }
 
-export async function createTicket(data: { subject: string; description: string; priority?: number } & TicketCustomFields): Promise<Ticket> {
+export async function createTicket(data: { tracker: TrackerKey; subject: string; description: string; priority?: number } & TicketCustomFields): Promise<Ticket> {
   return request<Ticket>('/tickets', {
     method: 'POST',
     body: JSON.stringify(data),

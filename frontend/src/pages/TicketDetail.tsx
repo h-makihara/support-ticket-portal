@@ -32,10 +32,8 @@ export function TicketDetail({ user }: { user: AuthUser }) {
       setTicket(t)
       setCustomFields({
         customer_id: t.customer_id,
-        report_required: t.report_required,
-        report_delivered: t.report_delivered,
-        customer_visit_required: t.customer_visit_required,
-        schedule_assigned: t.schedule_assigned,
+        ...(t.tracker === 'report' ? { report_delivered: t.report_delivered } : {}),
+        ...(t.tracker === 'customer_visit' ? { schedule_assigned: t.schedule_assigned } : {}),
       })
       setAuditLog(t.audit_log ?? [])
       const options = opts.length > 0
@@ -171,7 +169,7 @@ export function TicketDetail({ user }: { user: AuthUser }) {
       <div className="card">
         <h1>{ticket.subject}</h1>
         <div style={{ marginTop: '1rem', color: '#666' }}>
-          <strong>ID:</strong> {ticket.id} | <strong>ステータス:</strong> {ticket.status} | <strong>優先度:</strong> <span className={priorityBadgeClass(ticket)}>{priorityLabel(ticket)}</span>
+          <strong>ID:</strong> {ticket.id} | <strong>ステータス:</strong> {ticket.status} | <strong>優先度:</strong> <span className={priorityBadgeClass(ticket)}>{priorityLabel(ticket)}</span> | <span>トラッカー: {ticket.tracker_name}</span>
         </div>
         <div className="ticket-assignee">
           <span>対応者</span>
@@ -188,12 +186,12 @@ export function TicketDetail({ user }: { user: AuthUser }) {
             <input id="customer-id" type="text" value={customFields.customer_id} onChange={e => setCustomFields({ ...customFields, customer_id: e.target.value })} />
           </div>
           <div className="custom-field-checks">
-            <label><input type="checkbox" checked={customFields.report_required} onChange={e => setCustomFields({ ...customFields, report_required: e.target.checked })} /> 報告書が必要</label>
-            <label><input type="checkbox" checked={customFields.customer_visit_required} onChange={e => setCustomFields({ ...customFields, customer_visit_required: e.target.checked })} /> 客先同行が必要</label>
-            {user.roles.includes('support') && <>
+            {user.roles.includes('support') && ticket.tracker === 'report' && (
               <label><input type="checkbox" checked={customFields.report_delivered ?? false} onChange={e => setCustomFields({ ...customFields, report_delivered: e.target.checked })} /> 報告書を渡した</label>
+            )}
+            {user.roles.includes('support') && ticket.tracker === 'customer_visit' && (
               <label><input type="checkbox" checked={customFields.schedule_assigned ?? false} onChange={e => setCustomFields({ ...customFields, schedule_assigned: e.target.checked })} /> 予定・担当者をアサインした</label>
-            </>}
+            )}
           </div>
           <button className="btn btn-success" onClick={handleCustomFields} disabled={submitting}>対応情報を更新</button>
         </div>
