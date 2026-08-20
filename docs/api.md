@@ -121,7 +121,7 @@ INPUTは `ticket_id`。OUTPUTは履歴を含む `TicketOutput`。
 | `PATCH /tickets/{id}/status` | `{status_id: integer}` | `DetailOutput` | 対応待ちへ戻す場合は担当解除 |
 | `PATCH /tickets/{id}/priority` | `{priority_id: integer}` | `DetailOutput` | Redmine列挙値にないIDは`400` |
 
-カスタムフィールドの要件フラグを新たに有効化すると、対応待ち・未割当に戻して優先度を1段階上げます。完了フラグを有効化すると、対応済み・起票者割当を優先します。
+完了フラグを有効化すると、対応済みへ変更し、担当者を起票者へ戻します。
 
 ## FAQ API
 
@@ -149,5 +149,5 @@ INPUTは `ticket_id`。OUTPUTは履歴を含む `TicketOutput`。
 
 - URL、HTTP method、既存JSONフィールドは維持する。
 - support専用フィールドはsales向けOUTPUTへ追加しない。
-- `tracker_id` はクライアント互換のためINPUTに残すが処理には使用しない。
+- チケット作成のINPUTには `tracker` として `inquiry`、`report`、`customer_visit` のいずれかを指定する。
 - Python側の旧 `backend.auth` と `backend.app` の主要importは移行期間中ファサード／aliasとして維持する。
