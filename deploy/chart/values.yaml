@@ -40,7 +40,6 @@ imagePullSecrets: []
 app:
   replicas: 1
   redmineProjectId: "1"
-  redmineTrackerId: "4"
   redmineProjectIdentifier: internal-inquiry
   sessionCookieSecure: false
   # Environment-specific backend variables. Values are rendered as strings.

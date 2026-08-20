@@ -52,10 +52,13 @@ end
 
 # Trackers, roles and workflows are administration resources and cannot be
 # created through Redmine's REST API. Provision them from inside Redmine.
-tracker_name = ENV.fetch("REDMINE_TRACKER_NAME", "問い合わせ")
-tracker = Tracker.find_or_initialize_by(name: tracker_name)
-tracker.default_status = statuses.fetch("対応待ち")
-tracker.save!
+tracker_names = ["問い合わせ", "報告書", "客先同行"]
+trackers = tracker_names.to_h do |name|
+  tracker = Tracker.find_or_initialize_by(name: name)
+  tracker.default_status = statuses.fetch("対応待ち")
+  tracker.save!
+  [name, tracker]
+end
 
 role_permissions = {
   "営業担当者" => [:view_issues, :add_issues, :edit_issues, :add_issue_notes, :view_wiki_pages],
@@ -83,8 +86,16 @@ project.name = ENV.fetch("REDMINE_PROJECT_NAME", "Internal Support")
 project.description = "Support ticket portal project"
 project.is_public = false
 project.enabled_module_names = (project.enabled_module_names + ["issue_tracking", "wiki"]).uniq
-project.trackers = Tracker.all.to_a
+project.trackers = trackers.values
 project.save!
+
+legacy_fields = IssueCustomField.where(name: ["報告書要否", "客先同行要否"])
+if legacy_fields.any? { |field| field.projects.exists?(project.id) }
+  ActiveRecord::Base.transaction do
+    project.issues.find_each(&:destroy!)
+    legacy_fields.each(&:destroy!)
+  end
+end
 
 wiki = project.wiki || Wiki.new(project: project)
 wiki.start_page = "FAQ"
@@ -93,11 +104,11 @@ wiki.save!
 sample_faqs = {
   "FAQ_report_request" => [
     "報告書が欲しいです",
-    "チケットを作成（既にやりとりするチケットがある場合は更新）し、報告書が必要にチェックを入れて対応情報を更新してください"
+    "報告書チケットを作成し、対応情報を更新してください"
   ],
   "FAQ_customer_visit" => [
     "報告書がわかりにくいので一緒に客先に同行してほしいです",
-    "チケットを作成（既にやりとりするチケットがある場合は更新）し、客先同行が必要にチェックを入れて対応情報を更新してください"
+    "客先同行チケットを作成し、対応情報を更新してください"
   ]
 }
 sample_faqs.each do |title, (question, answer)|
@@ -115,19 +126,17 @@ end
 # Portal-specific issue fields. Boolean defaults are explicitly false so both
 # newly created and existing issues have a predictable value in the portal.
 custom_field_definitions = [
-  ["顧客ID", "string", "", false],
-  ["報告書要否", "bool", "0", false],
-  ["報告書渡し済み", "bool", "0", true],
-  ["客先同行要否", "bool", "0", false],
-  ["予定・担当者アサイン済み", "bool", "0", true]
+  ["顧客ID", "string", "", false, tracker_names],
+  ["報告書渡し済み", "bool", "0", true, ["報告書"]],
+  ["予定・担当者アサイン済み", "bool", "0", true, ["客先同行"]]
 ]
-custom_field_definitions.each do |name, format, default_value, support_only|
+custom_field_definitions.each do |name, format, default_value, support_only, field_tracker_names|
   custom_field = IssueCustomField.find_or_initialize_by(name: name)
   custom_field.field_format = format
   custom_field.default_value = default_value
   custom_field.is_required = false
   custom_field.is_for_all = false
-  custom_field.trackers = [tracker]
+  custom_field.trackers = field_tracker_names.map { |name| trackers.fetch(name) }
   custom_field.projects = [project]
   # Redmine interprets visible=false plus role_ids as visibility restricted to
   # those roles. The portal API also enforces this boundary independently.
@@ -152,7 +161,7 @@ workflow_edges = [
 ]
 sales_destinations = ["対応待ち", "クローズ待ち", "クローズ"]
 
-workflow_trackers = (project.trackers.to_a + [tracker]).uniq
+workflow_trackers = trackers.values
 roles.each do |role_name, role|
   workflow_trackers.each do |workflow_tracker|
     WorkflowTransition.where(

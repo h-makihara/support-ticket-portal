@@ -3,7 +3,7 @@
 
 Redmine REST API を叩いて、以下のリソースを作成（既存ならスキップ）：
  - プロジェクト「社内問い合わせ」(internal-inquiry)
- - トラッカー「問い合わせ」
+ - トラッカー「問い合わせ」「報告書」「客先同行」
  - ステータス定義（対応待ち・対応中・対応済・クローズ待ち・クローズ）
  - ロール：営業担当者・サポート担当者
  - ロール別ワークフロー
@@ -35,7 +35,7 @@ ADMIN_PASS = os.getenv("ADMIN_PASS", "admin")
 
 PROJECT_IDENTIFIER = "internal-inquiry"
 PROJECT_NAME = "社内問い合わせ"
-TRACKER_NAME = "問い合わせ"
+TRACKER_NAMES = ("問い合わせ", "報告書", "客先同行")
 
 # Redmine のステータス名 → ポータルが利用する英語キー。
 # Redmine 6.1 の既定ステータスをポータル用の日本語表示へ変換する。
@@ -160,17 +160,18 @@ def ensure_project(client: httpx.Client, api_key: str) -> int:
     return pid
 
 
-def ensure_tracker(client: httpx.Client, api_key: str) -> int:
+def ensure_trackers(client: httpx.Client, api_key: str) -> dict[str, int]:
     """Rails bootstrap で作成されたトラッカーの存在を確認する。"""
-    trackers = _get(client, "trackers", api_key)
-    for t in trackers.get("trackers", []):
-        if t["name"] == TRACKER_NAME:
-            print(f"  ✓ Tracker '{TRACKER_NAME}' (ID={t['id']}) already exists")
-            return t["id"]
-
-    print(f"  ✗ Tracker '{TRACKER_NAME}' does not exist")
-    print("    Run the redmine-init service to provision administration resources")
-    sys.exit(1)
+    trackers = _get(client, "trackers", api_key).get("trackers", [])
+    ids = {tracker["name"]: tracker["id"] for tracker in trackers}
+    missing = [name for name in TRACKER_NAMES if name not in ids]
+    if missing:
+        print(f"  ✗ Missing trackers: {', '.join(missing)}")
+        print("    Run the redmine-init service to provision administration resources")
+        sys.exit(1)
+    for name in TRACKER_NAMES:
+        print(f"  ✓ Tracker '{name}' (ID={ids[name]}) already exists")
+    return {name: ids[name] for name in TRACKER_NAMES}
 
 
 def check_statuses(client: httpx.Client, api_key: str) -> Dict[str, int]:
@@ -233,7 +234,7 @@ def ensure_roles(client: httpx.Client, api_key: str):
 
 # ── .env generation ────────────────────────────────────────────────
 
-def write_env(api_key: str, project_id: int, tracker_id: int, status_map: Dict[str, int]):
+def write_env(api_key: str, project_id: int, status_map: Dict[str, int]):
     """プロジェクトルートの .env を生成"""
     env_path = ROOT_DIR / ".env"
     lines = [
@@ -241,7 +242,6 @@ def write_env(api_key: str, project_id: int, tracker_id: int, status_map: Dict[s
         f'REDMINE_BASE_URL="{REDMINE_URL}"',
         f'REDMINE_API_KEY="{api_key}"',
         f'REDMINE_PROJECT_ID="{project_id}"',
-        f'REDMINE_TRACKER_ID="{tracker_id}"',
         "",
         "# ── Generated status mapping (for reference) ─",
     ]
@@ -274,8 +274,8 @@ def main():
     project_id = ensure_project(client, api_key)
 
     # 4. Tracker
-    print("[Step 4] Ensuring tracker ...")
-    tracker_id = ensure_tracker(client, api_key)
+    print("[Step 4] Ensuring trackers ...")
+    tracker_ids = ensure_trackers(client, api_key)
 
     # 5. Statuses check
     print("[Step 5] Checking statuses ...")
@@ -287,7 +287,7 @@ def main():
 
     # 7. Write .env
     print("\n[Done] Generating .env ...")
-    write_env(api_key, project_id, tracker_id, status_map)
+    write_env(api_key, project_id, status_map)
 
     client.close()
 
@@ -296,7 +296,7 @@ def main():
     print("=" * 50)
     print(f"\n Redmine   : {REDMINE_URL}")
     print(f" Project   : {PROJECT_NAME} (ID={project_id})")
-    print(f" Tracker   : {TRACKER_NAME} (ID={tracker_id})")
+    print(f" Trackers  : {tracker_ids}")
     print(f" Statuses  : {status_map}")
     print()
 

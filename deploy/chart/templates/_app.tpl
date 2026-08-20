@@ -46,7 +46,6 @@ spec:
               valueFrom:
                 secretKeyRef: {name: support-ticket-portal-secrets, key: REDMINE_API_KEY}
             - {name: REDMINE_PROJECT_ID, value: {{ $root.Values.app.redmineProjectId | quote }}}
-            - {name: REDMINE_TRACKER_ID, value: {{ $root.Values.app.redmineTrackerId | quote }}}
             - {name: REDIS_URL, value: "redis://redis:6379/0"}
             - {name: SESSION_COOKIE_SECURE, value: {{ $root.Values.app.sessionCookieSecure | quote }}}
             - {name: CORS_ORIGINS, value: {{ printf "%s://%s" (ternary "https" "http" $root.Values.ingress.tls.enabled) (include "portal.host" $root) | quote }}}

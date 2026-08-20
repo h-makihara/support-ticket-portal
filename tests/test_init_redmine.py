@@ -54,19 +54,38 @@ def test_login_reports_disabled_rest_api_without_dumping_html(capsys):
     assert "sensitive proxy page" not in output
 
 
+def test_ensure_trackers_returns_all_portal_tracker_ids():
+    def handler(request):
+        assert request.url.path == "/trackers.json"
+        return httpx.Response(200, json={"trackers": [
+            {"id": 3, "name": "問い合わせ"},
+            {"id": 4, "name": "報告書"},
+            {"id": 5, "name": "客先同行"},
+        ]})
+
+    with client_for(handler) as client:
+        assert init_redmine.ensure_trackers(client, "api-key") == {
+            "問い合わせ": 3,
+            "報告書": 4,
+            "客先同行": 5,
+        }
+
+
 def test_missing_tracker_does_not_attempt_unsupported_post(capsys):
     requests = []
 
     def handler(request):
         requests.append(request)
-        return httpx.Response(200, json={"trackers": []})
+        return httpx.Response(200, json={"trackers": [
+            {"id": 3, "name": "問い合わせ"},
+        ]})
 
     with client_for(handler) as client:
         with pytest.raises(SystemExit):
-            init_redmine.ensure_tracker(client, "api-key")
+            init_redmine.ensure_trackers(client, "api-key")
 
     assert [request.method for request in requests] == ["GET"]
-    assert "redmine-init" in capsys.readouterr().out
+    assert "報告書, 客先同行" in capsys.readouterr().out
 
 
 def test_statuses_support_redmine_61_defaults():
