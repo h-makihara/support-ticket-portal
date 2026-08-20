@@ -50,6 +50,7 @@ spec:
                 secretKeyRef: {name: support-ticket-portal-secrets, key: REDMINE_API_KEY}
             - {name: REDMINE_PROJECT_ID, value: {{ .Values.app.redmineProjectId | quote }}}
             - {name: REDMINE_PROJECT_IDENTIFIER, value: {{ .Values.app.redmineProjectIdentifier | quote }}}
+            - {name: RETIRE_LEGACY_REQUEST_FIELDS, value: {{ .Values.trackerMigration.enabled | quote }}}
             - {name: ENABLE_TEST_USERS, value: {{ .Values.app.testUsers.enabled | quote }}}
             - {name: TEST_ADMIN_USERNAME, value: {{ include "portal.testUsername" (dict "root" . "role" "admin") | quote }}}
             - {name: TEST_ADMIN_EMAIL, value: {{ include "portal.testEmail" (dict "root" . "role" "admin") | quote }}}

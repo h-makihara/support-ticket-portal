@@ -15,6 +15,8 @@
 ```bash
 ./scripts/helmfile-deploy.sh int info
 ./scripts/helmfile-deploy.sh int sync team-space
+# バックアップ後にだけ実行する旧要否フィールド移行
+./scripts/helmfile-deploy.sh int tracker-migration team-space
 ./scripts/helmfile-e2e.sh int --namespace team-space --slot green
 ```
 

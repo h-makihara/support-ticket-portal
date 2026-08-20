@@ -110,7 +110,7 @@ portal_select_environment() {
 }
 
 portal_usage_deploy() {
-  echo "usage: helmfile-deploy.sh <environment> [sync|diff|template|destroy|info] [namespace]"
+  echo "usage: helmfile-deploy.sh <environment> [sync|tracker-migration|diff|template|destroy|info] [namespace]"
 }
 
 portal_load_secret_env() {

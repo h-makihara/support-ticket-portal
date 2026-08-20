@@ -68,6 +68,8 @@ releases:
       - environment: {{ .Environment.Name | quote }}
         blueGreen:
           phase: {{ env "PORTAL_BLUE_GREEN_PHASE" | default "active" | quote }}
+        trackerMigration:
+          enabled: {{ eq (env "PORTAL_TRACKER_MIGRATION" | default "false") "true" }}
         app:
           testUsers:
             usernamePrefix: {{ .Environment.Name | quote }}

@@ -13,7 +13,7 @@ metadata:
     app.kubernetes.io/slot: {{ $slot }}
     {{- end }}
 spec:
-  replicas: {{ $root.Values.app.replicas }}
+  replicas: {{ if $root.Values.trackerMigration.enabled }}0{{ else }}{{ $root.Values.app.replicas }}{{ end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: backend
@@ -107,7 +107,7 @@ metadata:
     app.kubernetes.io/slot: {{ $slot }}
     {{- end }}
 spec:
-  replicas: {{ $root.Values.app.replicas }}
+  replicas: {{ if $root.Values.trackerMigration.enabled }}0{{ else }}{{ $root.Values.app.replicas }}{{ end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: frontend

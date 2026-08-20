@@ -32,18 +32,10 @@ Redmine をチケット基盤として利用する、社内問い合わせ向け
 ```bash
 cp .env.example .env
 # .env の REDMINE_SECRET_KEY_BASE を安全なランダム値へ変更
-docker compose up -d postgres redmine
-python3 scripts/init_redmine.py
-docker compose up --build -d
-```
-
-初期化スクリプトが `.env` に Redmine API キーとプロジェクト IDを書き込み、問い合わせ・報告書・客先同行の3トラッカーを確認します。起動後は http://localhost:3001 を開き、Redmine アカウントでログインします。
-
-一括セットアップを行う場合は、次のスクリプトも利用できます。
-
-```bash
 ./scripts/init.sh
 ```
+
+初期化スクリプトは、問い合わせ・報告書・客先同行の3トラッカーと必要なRedmine管理リソースを準備します。通常初期化は非破壊です。旧要否フィールドの廃止は[明示的なメンテナンス手順](docs/redmine.md#初期化)だけで実行します。起動後は http://localhost:3001 を開き、Redmine アカウントでログインします。
 
 ## 開発と検証
 

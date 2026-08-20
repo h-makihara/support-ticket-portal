@@ -25,8 +25,13 @@ fi
 ruby tests/helm/manifest_assertions.rb active
 ruby tests/helm/manifest_assertions.rb migration
 ruby tests/helm/manifest_assertions.rb coexist
+ruby tests/helm/manifest_assertions.rb tracker-migration
 bash tests/helm/test_deploy_script.sh
+bash tests/test_init_script.sh
 bash tests/helm/test_e2e_script.sh
+ruby -c tests/redmine_migration_test.rb
+docker compose -p support-ticket-portal-redmine-migration-test-config \
+  -f tests/redmine-migration.compose.yaml config -q
 
 export REDMINE_API_KEY=validation-api-key
 export REDMINE_SECRET_KEY_BASE=validation-secret-key-base

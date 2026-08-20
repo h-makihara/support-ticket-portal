@@ -85,6 +85,57 @@ class TestCreateTicket:
         assert response.status_code == 503
         assert "報告書" in response.json()["detail"]
 
+    @pytest.mark.parametrize("failure", ["transport", "non_200", "malformed_json", "bad_id"])
+    def test_create_ticket_translates_tracker_dependency_failures_to_503(
+        self, client: TestClient, failure: str
+    ):
+        route = respx.get("http://test-redmine:3000/trackers.json")
+        if failure == "transport":
+            route.mock(side_effect=app_module.httpx.ConnectError("tracker service unavailable"))
+        elif failure == "non_200":
+            route.mock(return_value=app_module.httpx.Response(502, text="bad gateway"))
+        elif failure == "malformed_json":
+            route.mock(
+                return_value=app_module.httpx.Response(
+                    200, content=b"{", headers={"content-type": "application/json"}
+                )
+            )
+        else:
+            route.mock(
+                return_value=app_module.httpx.Response(
+                    200, json={"trackers": [{"id": 1.5, "name": "報告書"}]}
+                )
+            )
+
+        response = client.post("/tickets", json={
+            "tracker": "report",
+            "subject": "件名",
+            "description": "本文",
+        })
+
+        assert response.status_code == 503
+        assert "トラッカー設定" in response.json()["detail"]
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("tracker_id", 4), ("report_required", True), ("customer_visit_required", True)],
+    )
+    def test_create_ticket_rejects_removed_fields(
+        self, client: TestClient, field: str, value: object
+    ):
+        response = client.post("/tickets", json={
+            "tracker": "report",
+            "subject": "件名",
+            "description": "本文",
+            field: value,
+        })
+
+        assert response.status_code == 422
+        assert not any(
+            call.request.method == "POST" and call.request.url.path == "/issues.json"
+            for call in respx.calls
+        )
+
     @pytest.mark.parametrize(("tracker", "expected_fields"), [
         ("inquiry", [{"id": 11, "value": "C-100"}]),
         ("report", [
@@ -175,6 +226,93 @@ class TestListTickets:
             if call.request.url.path == "/issues.json"
         )
         assert issues_request.url.params["status_id"] == "*"
+
+    def test_list_tickets_skips_issues_with_unexpected_trackers(self, client: TestClient):
+        upstream_issues = [
+            {
+                "id": 200,
+                "subject": "unsupported",
+                "description": "",
+                "tracker": {"id": 1, "name": "Bug"},
+                "author": {"id": 7, "name": "Test User"},
+                "status": {"id": 1, "name": "対応待ち"},
+                "priority": {"id": 2, "name": "Normal"},
+            },
+            {
+                "id": 201,
+                "subject": "supported",
+                "description": "",
+                "tracker": {"id": 3, "name": "問い合わせ"},
+                "author": {"id": 7, "name": "Test User"},
+                "status": {"id": 1, "name": "対応待ち"},
+                "priority": {"id": 2, "name": "Normal"},
+            },
+        ]
+
+        def paginated_upstream(request: app_module.httpx.Request):
+            limit = min(int(request.url.params["limit"]), 100)
+            offset = int(request.url.params["offset"])
+            return app_module.httpx.Response(
+                200,
+                json={
+                    "issues": upstream_issues[offset : offset + limit],
+                    "total_count": 2,
+                },
+            )
+
+        route = respx.get("http://test-redmine:3000/issues.json").mock(
+            side_effect=paginated_upstream
+        )
+
+        response = client.get("/tickets?limit=1&offset=0")
+
+        assert response.status_code == 200
+        assert [ticket["id"] for ticket in response.json()["tickets"]] == [201]
+        assert response.json()["pagination"]["total_count"] == 1
+        assert route.calls.last.request.url.params["limit"] == "100"
+        assert route.calls.last.request.url.params["offset"] == "0"
+
+    def test_list_tickets_pages_redmine_before_local_filtering(self, client: TestClient):
+        upstream_issues = [
+            {
+                "id": 300 + index,
+                "subject": f"supported-{index}",
+                "description": "",
+                "tracker": {"id": 3, "name": "問い合わせ"},
+                "author": {"id": 7, "name": "Test User"},
+                "status": {"id": 1, "name": "対応待ち"},
+                "priority": {"id": 2, "name": "Normal"},
+            }
+            for index in range(101)
+        ]
+
+        def paginated_upstream(request: app_module.httpx.Request):
+            limit = min(int(request.url.params["limit"]), 100)
+            offset = int(request.url.params["offset"])
+            return app_module.httpx.Response(
+                200,
+                json={
+                    "issues": upstream_issues[offset : offset + limit],
+                    "total_count": len(upstream_issues),
+                },
+            )
+
+        route = respx.get("http://test-redmine:3000/issues.json").mock(
+            side_effect=paginated_upstream
+        )
+
+        response = client.get("/tickets?limit=1&offset=100")
+
+        assert response.status_code == 200
+        assert [ticket["id"] for ticket in response.json()["tickets"]] == [400]
+        assert response.json()["pagination"] == {
+            "limit": 1,
+            "offset": 100,
+            "total_count": 101,
+            "has_more": False,
+        }
+        assert [call.request.url.params["offset"] for call in route.calls] == ["0", "100"]
+        assert all(call.request.url.params["limit"] == "100" for call in route.calls)
 
     def test_uses_authenticated_users_api_key(self, client: TestClient, mock_redmine_api):
         resp = client.get("/tickets")
@@ -383,6 +521,18 @@ class TestAddComment:
 
 
 class TestCustomFields:
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("tracker_id", 4), ("report_required", True), ("customer_visit_required", True)],
+    )
+    def test_update_custom_fields_rejects_removed_fields(
+        self, client: TestClient, field: str, value: object
+    ):
+        response = client.patch("/tickets/100/custom-fields", json={field: value})
+
+        assert response.status_code == 422
+        assert not any(call.request.method == "PUT" for call in respx.calls)
+
     def test_support_sees_and_updates_all_fields(self, client: TestClient):
         detail = client.get("/tickets/100")
         assert detail.json()["customer_id"] == "C-100"

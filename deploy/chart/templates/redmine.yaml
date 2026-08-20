@@ -32,7 +32,7 @@ metadata:
   labels:
     {{- include "portal.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ if .Values.trackerMigration.enabled }}0{{ else }}1{{ end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: redmine

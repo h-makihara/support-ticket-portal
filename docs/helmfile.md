@@ -88,6 +88,22 @@ kubectl -n support-ticket-portal-int get pods,ingress
 
 Namespaceの指定は、その環境の**最初の配置先**を選ぶためだけのものです。environmentごとのHelm release名は固定なので、同じenvironmentを別Namespaceへ並行して複製することはできません。既存releaseを検出した`sync`は重複を拒否します。Namespaceを移すときは、まずバックアップを取り、現在のNamespaceをdestroyしてから、新しいNamespaceを第3引数に指定して再作成してください。
 
+### 旧要否フィールドのメンテナンス移行
+
+通常の`sync`では、Redmine bootstrapが旧「報告書要否」「客先同行要否」や既存チケットを削除しません。廃止時は[バックアップ手順](#3-postgresql-と添付ファイルのバックアップ)で復元可能なバックアップを確認し、PortalとRedmineの停止時間を周知した後に次を実行します。
+
+```bash
+./scripts/helmfile-deploy.sh "$ENVIRONMENT" tracker-migration "$NAMESPACE"
+```
+
+スクリプトはFrontend、Backend、Redmineの全Deploymentをまず0レプリカにし、対象Podの終了を待ってから、破壊的処理にopt-inしたbootstrap Jobを実行します。その後に通常releaseを再syncしてサービスを復帰します。復帰に失敗した場合は0レプリカを維持するため、原因を修正して次の通常syncを再実行します。
+
+```bash
+./scripts/helmfile-deploy.sh "$ENVIRONMENT" sync "$NAMESPACE"
+```
+
+移行によって削除されたチケットを取り戻す場合は、データベースバックアップから復元してください。
+
 ## Blue-Greenデプロイ
 
 FrontendとBackendはそれぞれ`blue`、`green`の2つのDeploymentとして常時起動します。Ingressが参照する`frontend`、`backend` Serviceは、`blueGreen.activeSlot`のslot labelを持つPodだけを選択します。Portal Frontendは常に同じslotのBackendへ接続するため、slotをまたいだ組み合わせにはなりません。PostgreSQL、Redis、Redmineなどの永続系コンポーネントは両slotで共有します。

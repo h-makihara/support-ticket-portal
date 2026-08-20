@@ -13,22 +13,20 @@
 cp .env.example .env
 ```
 
-`.env` の `REDMINE_SECRET_KEY_BASE` を十分に長いランダム値へ変更します。初回は Redmine を起動して初期化し、その後すべてのサービスを起動します。
-
-```bash
-docker compose up -d postgres redmine
-python3 scripts/init_redmine.py
-docker compose up --build -d
-```
-
-`scripts/init_redmine.py` は Redmine の REST API を有効化したうえで、問い合わせプロジェクト、問い合わせ・報告書・客先同行トラッカー、ロールを確認し、実行時に必要なプロジェクト ID と API キーを `.env` へ保存します。トラッカー ID 用の環境変数は不要です。
-
-`HTTP_PROXY` / `HTTPS_PROXY` が設定された環境にも対応しています。リモート Redmine へは環境のプロキシを利用し、`localhost` およびループバック IP への初期化通信は認証情報をプロキシへ送らず直接接続します。
-
-一括実行する場合:
+`.env` の `REDMINE_SECRET_KEY_BASE` を十分に長いランダム値へ変更し、プロビジョニングを含む初期化スクリプトを実行します。
 
 ```bash
 ./scripts/init.sh
+```
+
+`scripts/init.sh` はRails bootstrapでトラッカー・ロール・ワークフローを準備した後、`scripts/init_redmine.py`で必要なリソースを確認します。通常実行は旧フィールドやチケットを削除しません。トラッカー ID 用の環境変数は不要です。
+
+`HTTP_PROXY` / `HTTPS_PROXY` が設定された環境にも対応しています。リモート Redmine へは環境のプロキシを利用し、`localhost` およびループバック IP への初期化通信は認証情報をプロキシへ送らず直接接続します。
+
+旧要否フィールドの破壊的移行は通常初期化と分離されています。実行前に[バックアップ・停止時間・復旧手順](redmine.md#初期化)を確認してください。
+
+```bash
+./scripts/init.sh --tracker-migration
 ```
 
 ## アクセス先

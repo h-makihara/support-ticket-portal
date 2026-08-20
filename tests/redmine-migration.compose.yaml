@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: redmine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redmine:
+    image: redmine:6.1
+    environment:
+      REDMINE_DB_POSTGRES: postgres
+      REDMINE_DB_USER: postgres
+      REDMINE_DB_PASSWORD: postgres
+      REDMINE_DB_DATABASE: redmine
+      SECRET_KEY_BASE: disposable-redmine-migration-test-only
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - ruby
+        - -rnet/http
+        - -e
+        - 'exit(Net::HTTP.get_response(URI("http://localhost:3000/login")).is_a?(Net::HTTPSuccess) ? 0 : 1)'
+      interval: 3s
+      timeout: 3s
+      retries: 60
+    volumes:
+      - redmine_files:/usr/src/redmine/files
+      - redmine_assets:/usr/src/redmine/public/assets
+      - ../scripts/bootstrap_redmine.rb:/usr/src/redmine/bootstrap_redmine.rb:ro
+      - ./redmine_migration_test.rb:/usr/src/redmine/redmine_migration_test.rb:ro
+
+volumes:
+  pg_data:
+  redmine_files:
+  redmine_assets:

@@ -13,13 +13,24 @@
 ## 初期化
 
 ```bash
-docker compose up -d postgres redmine
-python3 scripts/init_redmine.py
+./scripts/init.sh
 ```
 
-初期化処理は冪等で、既存リソースを確認して不足分のみを設定します。トラッカーは Redmine REST API から新規作成できないため、存在しない場合は Redmine 管理画面で作成してから再実行します。
+通常の初期化は冪等で、代替トラッカー、カスタムフィールド、ワークフローを検証・補修しますが、旧フィールドやチケットを削除しません。Helmの通常`sync`で実行されるbootstrap Jobも同じ非破壊モードです。
 
-旧「報告書要否」「客先同行要否」カスタムフィールドがプロジェクトへ残っている環境では、移行時に既存プロジェクトチケットを一度だけ削除してから旧フィールドを削除します。これは旧フィールドが検出された場合だけの破壊的な移行であり、運用データを残す必要がある環境では実行前にバックアップと移行計画を確認してください。
+旧「報告書要否」「客先同行要否」を廃止する場合だけ、作業時間を確保し、PostgreSQLの復元可能なバックアップを取得してから次の明示的なメンテナンス操作を実行します。対象プロジェクトの既存チケットは全て削除され、復元にはバックアップが必要です。
+
+```bash
+# Docker Compose: Frontend、Backend、Redmineを停止して移行後に再起動
+./scripts/init.sh --tracker-migration
+
+# Kubernetes: 同じ3種のDeploymentを0レプリカにし、opt-in Job実行後に通常releaseを復帰
+./scripts/helmfile-deploy.sh int tracker-migration
+# custom Namespaceの場合
+./scripts/helmfile-deploy.sh int tracker-migration team-space
+```
+
+作業中はPortalとRedmineの直接操作の両方が停止します。対象外プロジェクトの子チケットが対象プロジェクトのチケットへ紐付いている場合は、連鎖削除を避けるため移行を中止します。親子関係を解消してから再実行してください。移行または通常releaseの復帰に失敗した場合、安全側の0レプリカ状態を維持します。原因を修正した後、Kubernetesは`./scripts/helmfile-deploy.sh <env> sync [namespace]`、Composeは`./scripts/init.sh`を再実行してサービスを復帰します。削除済みチケットを取り戻す場合はバックアップから復元してください。
 
 `scripts/bootstrap_redmine.rb` は Docker 環境内で、REST API の有効化、ロール・ワークフロー、必要に応じた検証ユーザーの準備に利用されます。
 
@@ -86,7 +97,7 @@ FAQは対象プロジェクトのRedmine Wikiに保存します。ポータル�
 - サポート担当者: FAQの作成、一覧、検索、詳細表示、編集、削除
 - Redmine管理者: FAQの作成、一覧、検索、詳細表示、編集、削除
 
-初期化時に、報告書の依頼方法と客先同行の依頼方法に関する2件のFAQを冪等に作成します。既存ページは上書きしないため、運用開始後に編集した内容は再デプロイでも維持されます。
+初期化時に、報告書の依頼方法と客先同行の依頼方法に関する2件のFAQを冪等に作成します。例外として、本リリースが配布した旧シード本文と完全一致するページだけは、Wikiの履歴を残したままトラッカー向けの案内へ更新します。それ以外の既存ページは上書きせず、運用者の編集内容を維持します。
 
 ## ページネーション
 

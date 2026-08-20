@@ -28,6 +28,16 @@ def deployment_image(documents, name, container)
   containers.find { |item| item.fetch("name") == container }.fetch("image")
 end
 
+def deployment_replicas(documents, name)
+  resource(documents, "Deployment", name).dig("spec", "replicas")
+end
+
+def container_env(documents, kind, resource_name, container_name, env_name)
+  containers = resource(documents, kind, resource_name).dig("spec", "template", "spec", "containers")
+  container = containers.find { |item| item.fetch("name") == container_name }
+  container.fetch("env").find { |item| item.fetch("name") == env_name }.fetch("value")
+end
+
 def assert_frontend_nginx_config(documents, slot)
   deployment = resource(documents, "Deployment", "frontend-#{slot}")
   template = deployment.fetch("spec").fetch("template")
@@ -104,8 +114,29 @@ def assert_active
   raise "blue frontend routes to wrong backend" unless resource(docs, "ConfigMap", "frontend-blue-nginx").fetch("data").fetch("default.conf").include?("proxy_pass http://backend-blue:8000/;")
   raise "green frontend routes to wrong backend" unless resource(docs, "ConfigMap", "frontend-green-nginx").fetch("data").fetch("default.conf").include?("proxy_pass http://backend-green:8000/;")
   %w[blue green].each { |slot| assert_frontend_nginx_config(docs, slot) }
+  %w[backend-blue backend-green frontend-blue frontend-green].each do |name|
+    raise "active #{name} must restore configured replicas" unless deployment_replicas(docs, name) == 1
+  end
+  raise "active Redmine must be running" unless deployment_replicas(docs, "redmine") == 1
+  unless container_env(docs, "Job", "redmine-bootstrap", "bootstrap", "RETIRE_LEGACY_REQUEST_FIELDS") == "false"
+    raise "normal sync must not opt in to legacy request-field retirement"
+  end
 
   assert_negative_renders
+end
+
+def assert_tracker_migration
+  docs = documents_for([
+    "blueGreen.phase=active",
+    "trackerMigration.enabled=true"
+  ])
+
+  %w[backend-blue backend-green frontend-blue frontend-green redmine].each do |name|
+    raise "tracker migration must scale #{name} to zero" unless deployment_replicas(docs, name).zero?
+  end
+  unless container_env(docs, "Job", "redmine-bootstrap", "bootstrap", "RETIRE_LEGACY_REQUEST_FIELDS") == "true"
+    raise "tracker migration must explicitly opt in to legacy request-field retirement"
+  end
 end
 
 def assert_migration
@@ -137,5 +168,6 @@ case ARGV.fetch(0)
 when "active" then assert_active
 when "migration" then assert_migration
 when "coexist" then assert_coexist
-else abort "usage: #{$PROGRAM_NAME} [active|migration|coexist]"
+when "tracker-migration" then assert_tracker_migration
+else abort "usage: #{$PROGRAM_NAME} [active|migration|coexist|tracker-migration]"
 end

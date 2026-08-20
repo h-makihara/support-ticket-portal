@@ -74,32 +74,52 @@ EOF
 
   cat >"$TEST_BIN/kubectl" <<'EOF'
 #!/usr/bin/env bash
-printf 'kubectl|%s|namespace=%s|phase=%s\n' "$*" "${PORTAL_NAMESPACE:-}" "${PORTAL_BLUE_GREEN_PHASE:-}" >>"$PORTAL_TEST_LOG"
-ignore_not_found=false
-for argument in "$@"; do
-  if [[ "$argument" == --ignore-not-found ]]; then
-    ignore_not_found=true
-  fi
-done
-if [[ "$ignore_not_found" != true ]]; then
-  echo "kubectl fake requires --ignore-not-found" >&2
-  exit 44
-fi
-if [[ "${FAKE_KUBECTL_MODE:-ok}" == fail ]]; then
-  echo "simulated kubectl failure" >&2
-  exit 43
-fi
-if [[ "${FAKE_LEGACY_DEPLOYMENTS:-}" == *backend* ]]; then
-  printf 'deployment.apps/backend\n'
-fi
-if [[ "${FAKE_LEGACY_DEPLOYMENTS:-}" == *frontend* ]]; then
-  printf 'deployment.apps/frontend\n'
-fi
+printf 'kubectl|%s|namespace=%s|phase=%s|tracker_migration=%s\n' "$*" "${PORTAL_NAMESPACE:-}" "${PORTAL_BLUE_GREEN_PHASE:-}" "${PORTAL_TRACKER_MIGRATION:-}" >>"$PORTAL_TEST_LOG"
+case " $* " in
+  *" get deployment "*)
+    if [[ "$*" == *--selector=app.kubernetes.io/instance=* ]]; then
+      printf '%s' "${FAKE_WRITER_DEPLOYMENTS:-}"
+    elif [[ "$*" != *--ignore-not-found* ]]; then
+      echo "kubectl fake requires --ignore-not-found for deployment discovery" >&2
+      exit 44
+    else
+      if [[ "${FAKE_KUBECTL_MODE:-ok}" == fail ]]; then
+        echo "simulated kubectl failure" >&2
+        exit 43
+      fi
+      if [[ "${FAKE_LEGACY_DEPLOYMENTS:-}" == *backend* ]]; then
+        printf 'deployment.apps/backend\n'
+      fi
+      if [[ "${FAKE_LEGACY_DEPLOYMENTS:-}" == *frontend* ]]; then
+        printf 'deployment.apps/frontend\n'
+      fi
+    fi
+    ;;
+  *" get pod "*)
+    printf '%s' "${FAKE_WRITER_PODS:-}"
+    ;;
+  *" scale deployment"*)
+    if [[ "${FAKE_KUBECTL_FAIL_SCALE:-false}" == true ]]; then
+      echo "simulated scale failure" >&2
+      exit 46
+    fi
+    ;;
+  *" wait --for=delete "*) ;;
+  *)
+    echo "unexpected kubectl call: $*" >&2
+    exit 44
+    ;;
+esac
 EOF
 
   cat >"$TEST_BIN/helmfile" <<'EOF'
 #!/usr/bin/env bash
-printf 'helmfile|%s|namespace=%s|phase=%s\n' "$*" "${PORTAL_NAMESPACE:-}" "${PORTAL_BLUE_GREEN_PHASE:-}" >>"$PORTAL_TEST_LOG"
+printf 'helmfile|%s|namespace=%s|phase=%s|tracker_migration=%s\n' "$*" "${PORTAL_NAMESPACE:-}" "${PORTAL_BLUE_GREEN_PHASE:-}" "${PORTAL_TRACKER_MIGRATION:-}" >>"$PORTAL_TEST_LOG"
+call_number="$(grep -c '^helmfile|' "$PORTAL_TEST_LOG")"
+if [[ "${FAKE_HELMFILE_FAIL_ON_CALL:-0}" == "$call_number" ]]; then
+  echo "simulated helmfile failure $call_number" >&2
+  exit 45
+fi
 EOF
 
   chmod +x "$TEST_BIN/helm" "$TEST_BIN/kubectl" "$TEST_BIN/helmfile"
@@ -169,16 +189,27 @@ assert_operational_failure_before_helmfile() {
 assert_phases() {
   local expected="$*"
   local actual
-  actual="$(sed -n 's/^helmfile|.*|phase=//p' "$PORTAL_TEST_LOG" | paste -sd ' ' -)"
+  actual="$(sed -n 's/^helmfile|.*|phase=\([^|]*\).*/\1/p' "$PORTAL_TEST_LOG" | paste -sd ' ' -)"
   if [[ "$actual" != "$expected" ]]; then
     fail "expected phases '$expected', got '$actual'"
+  fi
+}
+
+assert_tracker_migration_sequence() {
+  local scale_line migration_line restore_line
+  scale_line="$(grep -n 'kubectl|.* scale .*--replicas=0' "$PORTAL_TEST_LOG" | head -1 | cut -d: -f1)"
+  migration_line="$(grep -n '^helmfile|.*tracker_migration=true$' "$PORTAL_TEST_LOG" | head -1 | cut -d: -f1)"
+  restore_line="$(grep -n '^helmfile|.*tracker_migration=false$' "$PORTAL_TEST_LOG" | tail -1 | cut -d: -f1)"
+  if [[ -z "$scale_line" || -z "$migration_line" || -z "$restore_line" ||
+        "$scale_line" -ge "$migration_line" || "$migration_line" -ge "$restore_line" ]]; then
+    fail "tracker migration must scale writers to zero, opt in, then restore normally: $(cat "$PORTAL_TEST_LOG")"
   fi
 }
 
 assert_single_unphased_helmfile() {
   local action="$1"
   local phase_calls
-  phase_calls="$(sed -n 's/^helmfile|.*|phase=//p' "$PORTAL_TEST_LOG")"
+  phase_calls="$(sed -n 's/^helmfile|.*|phase=\([^|]*\).*/\1/p' "$PORTAL_TEST_LOG")"
   if [[ "$phase_calls" != '' ]]; then
     fail "$action must not invoke the three-phase state machine, got phases: $phase_calls"
   fi
@@ -198,12 +229,17 @@ assert_no_helm_preflight() {
 
 write_fake_clis
 export FAKE_HELM_MODE FAKE_HELM_RELEASE_ROWS FAKE_KUBECTL_MODE FAKE_LEGACY_DEPLOYMENTS
+export FAKE_WRITER_DEPLOYMENTS FAKE_WRITER_PODS FAKE_HELMFILE_FAIL_ON_CALL FAKE_KUBECTL_FAIL_SCALE
 
 CALLER_PHASE=''
 FAKE_HELM_MODE=rows
 FAKE_HELM_RELEASE_ROWS=''
 FAKE_KUBECTL_MODE=ok
 FAKE_LEGACY_DEPLOYMENTS=''
+FAKE_WRITER_DEPLOYMENTS=$'deployment.apps/backend-blue\ndeployment.apps/backend-green\ndeployment.apps/frontend-blue\ndeployment.apps/frontend-green\ndeployment.apps/redmine\n'
+FAKE_WRITER_PODS=''
+FAKE_HELMFILE_FAIL_ON_CALL=0
+FAKE_KUBECTL_FAIL_SCALE=false
 run_deploy dev info
 assert_log_empty
 assert_output_contains 'Namespace   : support-ticket-portal-dev'
@@ -253,6 +289,56 @@ assert_phases migration coexist active
 FAKE_LEGACY_DEPLOYMENTS=''
 run_deploy dev sync team-space
 assert_phases active
+if ! grep -q '^helmfile|.*tracker_migration=false$' "$PORTAL_TEST_LOG"; then
+  fail "normal sync must explicitly disable tracker retirement: $(cat "$PORTAL_TEST_LOG")"
+fi
+
+FAKE_HELM_RELEASE_ROWS='support-ticket-portal-dev team-space'
+FAKE_WRITER_PODS=$'pod/backend-blue-1\npod/frontend-blue-1\npod/redmine-1\n'
+run_deploy dev tracker-migration team-space
+if [[ "$DEPLOY_STATUS" -ne 0 ]]; then
+  fail "tracker migration must succeed, got exit $DEPLOY_STATUS: $DEPLOY_OUTPUT"
+fi
+assert_tracker_migration_sequence
+if ! grep -q 'kubectl|.* scale deployment.apps/backend-blue deployment.apps/backend-green deployment.apps/frontend-blue deployment.apps/frontend-green deployment.apps/redmine --replicas=0' "$PORTAL_TEST_LOG"; then
+  fail "tracker migration must explicitly scale every discovered writer Deployment: $(cat "$PORTAL_TEST_LOG")"
+fi
+for pod in backend-blue-1 frontend-blue-1 redmine-1; do
+  if ! grep -q "kubectl|.* wait --for=delete pod/$pod " "$PORTAL_TEST_LOG"; then
+    fail "tracker migration must wait for $pod to stop: $(cat "$PORTAL_TEST_LOG")"
+  fi
+done
+
+FAKE_HELMFILE_FAIL_ON_CALL=2
+run_deploy dev tracker-migration team-space
+if [[ "$DEPLOY_STATUS" -eq 0 ]]; then
+  fail "tracker migration must report a failed normal restore"
+fi
+scale_calls="$(grep -c 'kubectl|.* scale .*--replicas=0' "$PORTAL_TEST_LOG")"
+if [[ "$scale_calls" -ne 2 ]]; then
+  fail "failed restore must enforce the zero-replica safe state: $(cat "$PORTAL_TEST_LOG")"
+fi
+FAKE_HELMFILE_FAIL_ON_CALL=0
+FAKE_WRITER_PODS=''
+
+FAKE_KUBECTL_FAIL_SCALE=true
+run_deploy dev tracker-migration team-space
+if [[ "$DEPLOY_STATUS" -eq 0 ]]; then
+  fail "tracker migration must fail when writers cannot be scaled to zero"
+fi
+assert_output_contains 'warning: failed to verify zero-replica maintenance state'
+FAKE_KUBECTL_FAIL_SCALE=false
+
+FAKE_WRITER_DEPLOYMENTS=$'deployment.apps/backend-blue\ndeployment.apps/frontend-blue\n'
+run_deploy dev tracker-migration team-space
+if [[ "$DEPLOY_STATUS" -eq 0 ]]; then
+  fail "tracker migration must fail if a writer Deployment type is missing"
+fi
+assert_output_contains 'failed to find backend, frontend, and Redmine Deployments'
+if grep -q '^helmfile|' "$PORTAL_TEST_LOG"; then
+  fail "missing writer Deployments must fail before destructive bootstrap: $(cat "$PORTAL_TEST_LOG")"
+fi
+FAKE_WRITER_DEPLOYMENTS=$'deployment.apps/backend-blue\ndeployment.apps/backend-green\ndeployment.apps/frontend-blue\ndeployment.apps/frontend-green\ndeployment.apps/redmine\n'
 
 FAKE_LEGACY_DEPLOYMENTS='backend frontend'
 FAKE_HELM_RELEASE_ROWS='support-ticket-portal-dev other-space'

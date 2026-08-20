@@ -22,13 +22,15 @@ case "$ACTION" in
     portal_print_info
     exit 0
     ;;
-  sync|diff|template|destroy) ;;
+  sync|tracker-migration|diff|template|destroy) ;;
   *) echo "unsupported action: $ACTION" >&2; exit 2 ;;
 esac
 
 portal_load_secret_env
 portal_require_deploy_secrets
 unset PORTAL_BLUE_GREEN_PHASE
+PORTAL_TRACKER_MIGRATION=false
+export PORTAL_TRACKER_MIGRATION
 
 portal_release_conflict_messages() {
   local release inventory namespaces namespace found=1
@@ -66,9 +68,9 @@ for item in items:
   return "$found"
 }
 
-if [[ "$ACTION" == sync || "$ACTION" == diff ]]; then
+if [[ "$ACTION" == sync || "$ACTION" == tracker-migration || "$ACTION" == diff ]]; then
   if conflict_messages="$(portal_release_conflict_messages)"; then
-    if [[ "$ACTION" == sync ]]; then
+    if [[ "$ACTION" == sync || "$ACTION" == tracker-migration ]]; then
       echo "$conflict_messages" >&2
       exit 1
     fi
@@ -82,6 +84,73 @@ if [[ "$ACTION" == sync || "$ACTION" == diff ]]; then
 fi
 
 cd "$ROOT_DIR"
+
+portal_scale_writers_to_zero() {
+  local instance_selector pod_selector deployments deployment deployment_name pods pod
+  local backend_found=false frontend_found=false redmine_found=false
+  local -a writer_deployments=()
+
+  instance_selector="app.kubernetes.io/instance=$PORTAL_RELEASE"
+  pod_selector="$instance_selector,app.kubernetes.io/name in (backend,frontend,redmine)"
+  deployments="$(kubectl -n "$PORTAL_NAMESPACE" get deployment --selector="$instance_selector" -o name)" || return
+  while IFS= read -r deployment; do
+    deployment_name="${deployment##*/}"
+    case "$deployment_name" in
+      backend|backend-blue|backend-green)
+        backend_found=true
+        writer_deployments+=("$deployment")
+        ;;
+      frontend|frontend-blue|frontend-green)
+        frontend_found=true
+        writer_deployments+=("$deployment")
+        ;;
+      redmine)
+        redmine_found=true
+        writer_deployments+=("$deployment")
+        ;;
+    esac
+  done <<<"$deployments"
+  if [[ "$backend_found" != true || "$frontend_found" != true || "$redmine_found" != true ]]; then
+    echo "failed to find backend, frontend, and Redmine Deployments for $PORTAL_RELEASE" >&2
+    return 1
+  fi
+
+  kubectl -n "$PORTAL_NAMESPACE" scale "${writer_deployments[@]}" --replicas=0 || return
+  pods="$(kubectl -n "$PORTAL_NAMESPACE" get pod --selector="$pod_selector" -o name)" || return
+  while IFS= read -r pod; do
+    [[ -z "$pod" ]] || kubectl -n "$PORTAL_NAMESPACE" wait --for=delete "$pod" --timeout=120s || return
+  done <<<"$pods"
+}
+
+if [[ "$ACTION" == tracker-migration ]]; then
+  tracker_migration_in_progress=true
+  leave_tracker_migration_safe() {
+    local status=$?
+    trap - EXIT
+    if [[ "$tracker_migration_in_progress" == true ]]; then
+      echo "tracker migration did not restore service; enforcing zero-replica maintenance state" >&2
+      portal_scale_writers_to_zero || echo "warning: failed to verify zero-replica maintenance state" >&2
+    fi
+    exit "$status"
+  }
+  trap leave_tracker_migration_safe EXIT
+
+  portal_scale_writers_to_zero
+  PORTAL_BLUE_GREEN_PHASE=active
+  PORTAL_TRACKER_MIGRATION=true
+  export PORTAL_BLUE_GREEN_PHASE PORTAL_TRACKER_MIGRATION
+  helmfile --environment "$PORTAL_ENVIRONMENT" sync
+
+  PORTAL_TRACKER_MIGRATION=false
+  export PORTAL_TRACKER_MIGRATION
+  helmfile --environment "$PORTAL_ENVIRONMENT" sync
+
+  tracker_migration_in_progress=false
+  trap - EXIT
+  echo "Tracker migration completed and normal service was restored"
+  exit 0
+fi
+
 if [[ "$ACTION" == sync ]]; then
   if legacy_deployments="$(kubectl -n "$PORTAL_NAMESPACE" get deployment backend frontend -o name --ignore-not-found 2>&1)"; then
     kubectl_status=0

@@ -757,21 +757,38 @@ async def _custom_field_ids() -> Dict[str, int]:
 
 
 async def _tracker_id(tracker: TrackerKey) -> int:
-    async with httpx.AsyncClient(
-        base_url=REDMINE_BASE_URL, headers=HEADERS, timeout=10.0
-    ) as client:
-        response = await client.get("/trackers.json")
+    expected_name = TRACKER_NAMES[tracker]
+    try:
+        async with httpx.AsyncClient(
+            base_url=REDMINE_BASE_URL, headers=HEADERS, timeout=10.0
+        ) as client:
+            response = await client.get("/trackers.json")
+    except httpx.HTTPError as exc:
+        logger.warning("Failed to retrieve Redmine tracker configuration: %s", exc)
+        raise HTTPException(status_code=503, detail="トラッカー設定を取得できません") from None
     if response.status_code != 200:
         raise HTTPException(status_code=503, detail="トラッカー設定を取得できませんでした")
-    expected_name = TRACKER_NAMES[tracker]
+    try:
+        body = response.json()
+        tracker_items = body["trackers"]
+        if not isinstance(tracker_items, list):
+            raise TypeError("trackers must be a list")
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=503, detail="トラッカー設定の応答が不正です") from None
     match = next(
-        (item for item in response.json().get("trackers", [])
-         if item.get("name") == expected_name),
+        (item for item in tracker_items
+         if isinstance(item, dict) and item.get("name") == expected_name),
         None,
     )
     if match is None:
         raise HTTPException(status_code=503, detail=f"トラッカーが設定されていません: {expected_name}")
-    return int(match["id"])
+    tracker_id = match.get("id")
+    if not isinstance(tracker_id, int) or isinstance(tracker_id, bool) or tracker_id <= 0:
+        raise HTTPException(
+            status_code=503,
+            detail=f"トラッカー設定のIDが不正です: {expected_name}",
+        )
+    return tracker_id
 
 
 def _custom_fields_payload(values: Dict[str, Any], ids: Dict[str, int]) -> List[Dict[str, Any]]:
@@ -1186,21 +1203,41 @@ async def list_tickets(
             else:
                 logger.warning("Unknown status filter %r", status_key)
 
-        # Responder filtering happens after fetching because Redmine cannot
-        # filter assignees by project role.
-        filters_locally = responder_view or (is_sales and not is_support)
-        params["limit"] = 1000 if filters_locally else limit
-        params["offset"] = 0 if filters_locally else offset
-
+        # Tracker allowlisting and role filtering happen locally. Fetch before
+        # slicing so unsupported Redmine trackers cannot leave short pages or
+        # distort portal pagination.
         async with _client(session.redmine_api_key) as c:
-            r = await c.get("/issues.json", params=params)
-            span.set_attribute("redmine.status", r.status_code)
-            if r.status_code != 200:
-                return JSONResponse(status_code=r.status_code, content={"detail": r.text})
+            issues = []
+            redmine_offset = 0
+            while True:
+                page_params = {**params, "limit": 100, "offset": redmine_offset}
+                r = await c.get("/issues.json", params=page_params)
+                span.set_attribute("redmine.status", r.status_code)
+                if r.status_code != 200:
+                    return JSONResponse(status_code=r.status_code, content={"detail": r.text})
 
-            # Redmine normally honors limit, but keep our API contract even if
-            # an upstream proxy/mock returns more rows than requested.
-            issues = r.json()["issues"]
+                body = r.json()
+                page_issues = body["issues"]
+                issues.extend(page_issues)
+                upstream_total = int(body.get("total_count", len(issues)))
+                if not page_issues or len(issues) >= upstream_total:
+                    break
+                redmine_offset += len(page_issues)
+
+            portal_tracker_names = set(TRACKER_NAMES.values())
+            portal_issues = []
+            for issue in issues:
+                tracker_data = issue.get("tracker")
+                tracker_name = tracker_data.get("name") if isinstance(tracker_data, dict) else None
+                if tracker_name not in portal_tracker_names:
+                    logger.warning(
+                        "Skipping Redmine issue %s with unsupported tracker %r",
+                        issue.get("id"),
+                        tracker_name,
+                    )
+                    continue
+                portal_issues.append(issue)
+            issues = portal_issues
             if responder_view:
                 responder_statuses = {
                     "対応待ち",
@@ -1261,8 +1298,8 @@ async def list_tickets(
                 total_count = len(issues)
                 issues = issues[offset : offset + limit]
             else:
-                issues = issues[:limit]
-                total_count = r.json().get("total_count", len(issues))
+                total_count = len(issues)
+                issues = issues[offset : offset + limit]
             result = [_issue_to_dict(i, include_support_only=is_support) for i in issues]
             if responder_view:
                 for ticket in result:

@@ -35,6 +35,8 @@ def test_ticket_contract_uses_tracker_keys_and_matching_completion_fields():
     output = schemas["TicketOutput"]
     update = schemas["UpdateCustomFieldsInput"]
 
+    assert create["additionalProperties"] is False
+    assert update["additionalProperties"] is False
     assert "tracker" in create["required"]
     assert create["properties"]["tracker"]["enum"] == [
         "inquiry",

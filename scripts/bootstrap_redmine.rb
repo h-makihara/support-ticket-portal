@@ -2,9 +2,34 @@
 
 api_key = ENV.fetch("REDMINE_API_KEY")
 project_identifier = ENV.fetch("REDMINE_PROJECT_IDENTIFIER", "internal-inquiry")
+expected_project_id = Integer(ENV.fetch("REDMINE_PROJECT_ID", "1"))
+retire_legacy_request_fields = case ENV.fetch("RETIRE_LEGACY_REQUEST_FIELDS", "false")
+                               when "true" then true
+                               when "false" then false
+                               else abort "RETIRE_LEGACY_REQUEST_FIELDS must be true or false"
+                               end
+
+project_by_identifier = Project.find_by(identifier: project_identifier)
+if project_by_identifier && project_by_identifier.id != expected_project_id
+  abort "Expected project ID #{expected_project_id}, got #{project_by_identifier.id}"
+end
+project_by_id = Project.find_by(id: expected_project_id)
+if project_by_id && project_by_id.identifier != project_identifier
+  abort "Project ID #{expected_project_id} belongs to #{project_by_id.identifier}, not #{project_identifier}"
+end
 
 if Tracker.none? || IssueStatus.none? || IssuePriority.none?
   Redmine::DefaultData::Loader.load(ENV.fetch("REDMINE_LANG", "en"))
+end
+
+project = project_by_identifier || Project.new(identifier: project_identifier)
+project.name = ENV.fetch("REDMINE_PROJECT_NAME", "Internal Support")
+project.description = "Support ticket portal project"
+project.is_public = false
+project.enabled_module_names = (project.enabled_module_names + ["issue_tracking", "wiki"]).uniq
+project.save!
+unless project.id == expected_project_id
+  abort "Expected project ID #{expected_project_id}, got #{project.id}"
 end
 
 Setting.rest_api_enabled = "1"
@@ -81,21 +106,8 @@ token = Token.create!(user: admin, action: "api")
 # Token generates its own value on create; Compose needs a stable shared key.
 token.update_column(:value, api_key)
 
-project = Project.find_or_initialize_by(identifier: project_identifier)
-project.name = ENV.fetch("REDMINE_PROJECT_NAME", "Internal Support")
-project.description = "Support ticket portal project"
-project.is_public = false
-project.enabled_module_names = (project.enabled_module_names + ["issue_tracking", "wiki"]).uniq
 project.trackers = trackers.values
 project.save!
-
-legacy_fields = IssueCustomField.where(name: ["報告書要否", "客先同行要否"])
-if legacy_fields.any? { |field| field.projects.exists?(project.id) }
-  ActiveRecord::Base.transaction do
-    project.issues.find_each(&:destroy!)
-    legacy_fields.each(&:destroy!)
-  end
-end
 
 wiki = project.wiki || Wiki.new(project: project)
 wiki.start_page = "FAQ"
@@ -119,11 +131,9 @@ sample_faqs.each do |title, (question, legacy_answer, answer)|
   next if page && page.content&.text != "Q: #{question}\n\nA:\n#{legacy_answer}"
 
   page ||= WikiPage.new(wiki: wiki, title: title)
-  content = WikiContent.new(
-    page: page,
-    author: admin,
-    text: content_text
-  )
+  content = page.content || WikiContent.new(page: page)
+  content.author = admin
+  content.text = content_text
   page.save_with_content(content) || abort("Failed to create sample FAQ #{title}: #{page.errors.full_messages.join(', ')}")
 end
 
@@ -187,10 +197,6 @@ roles.each do |role_name, role|
   end
 end
 
-unless project.id == Integer(ENV.fetch("REDMINE_PROJECT_ID", "1"))
-  abort "Expected project ID #{ENV.fetch('REDMINE_PROJECT_ID', '1')}, got #{project.id}"
-end
-
 if ENV.fetch("ENABLE_TEST_USERS", "false") == "true"
   users = {
     admin: ["TEST_ADMIN", nil],
@@ -215,6 +221,51 @@ if ENV.fetch("ENABLE_TEST_USERS", "false") == "true"
     user.save!
     Member.find_or_create_by!(project: project, user: user) { |member| member.roles = [role] } if role
   end
+end
+
+# All replacement resources must be complete before the destructive marker is
+# retired. No fallible provisioning follows this validation/retirement block.
+unless project.reload.trackers.pluck(:name).sort == tracker_names.sort
+  abort "Project tracker associations are incomplete"
+end
+trackers.each_value do |tracker|
+  abort "Tracker #{tracker.name} has the wrong default status" unless tracker.reload.default_status == statuses.fetch("対応待ち")
+end
+custom_field_definitions.each do |name, _format, _default_value, _support_only, field_tracker_names|
+  custom_field = IssueCustomField.find_by!(name: name)
+  abort "Custom field #{name} has the wrong project" unless custom_field.projects.pluck(:id) == [project.id]
+  unless custom_field.trackers.pluck(:name).sort == field_tracker_names.sort
+    abort "Custom field #{name} has incomplete tracker associations"
+  end
+end
+roles.each do |role_name, role|
+  expected_transitions = workflow_edges.filter_map do |old_name, new_name|
+    next if role_name == "営業担当者" && old_name && !sales_destinations.include?(new_name)
+
+    [old_name ? statuses.fetch(old_name).id : 0, statuses.fetch(new_name).id]
+  end.sort
+  trackers.each_value do |tracker|
+    actual_transitions = WorkflowTransition.where(tracker_id: tracker.id, role_id: role.id)
+                                           .pluck(:old_status_id, :new_status_id).sort
+    abort "Workflow for #{role_name}/#{tracker.name} is incomplete" unless actual_transitions == expected_transitions
+  end
+end
+
+legacy_fields = IssueCustomField.where(name: ["報告書要否", "客先同行要否"])
+legacy_fields_attached = legacy_fields.any? { |field| field.projects.exists?(project.id) }
+if retire_legacy_request_fields && legacy_fields_attached
+  ActiveRecord::Base.transaction do
+    external_child = Issue.where(parent_id: project.issues.select(:id))
+                          .where.not(project_id: project.id).first
+    if external_child
+      abort "Cannot retire issues while cross-project child issue #{external_child.id} is attached"
+    end
+    project.issues.find_each(&:destroy!)
+    legacy_fields.each(&:destroy!)
+  end
+  puts "Retired legacy request fields and #{project.identifier} issues"
+elsif legacy_fields_attached
+  puts "Legacy request fields detected; explicit tracker-migration maintenance is required"
 end
 
 puts "Redmine bootstrap complete (project_id=#{project.id})"

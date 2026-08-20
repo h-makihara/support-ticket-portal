@@ -1,12 +1,14 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.application.schemas.common import PaginationOutput
 from backend.domain.models.ticket import TrackerKey
 
 
 class CreateTicketInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     tracker: TrackerKey
     subject: str = Field(description="件名。空白除去後に必須")
     description: str = Field(description="問い合わせ内容。空白除去後に必須")
@@ -17,6 +19,8 @@ class CreateTicketInput(BaseModel):
 
 
 class UpdateCustomFieldsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     customer_id: str | None = None
     report_delivered: bool | None = None
     schedule_assigned: bool | None = None

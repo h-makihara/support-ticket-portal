@@ -147,7 +147,7 @@ INPUTは `ticket_id`。OUTPUTは履歴を含む `TicketOutput`。
 
 ## 互換性方針
 
-- URL、HTTP method、既存JSONフィールドは維持する。
+- URLとHTTP methodは維持する。ただしトラッカー移行は明示的な破壊的変更であり、作成INPUTで`tracker`が必須になるとともに、`tracker_id`、`report_required`、`customer_visit_required`は削除された。削除済みフィールドを送信すると`422`を返す。
 - support専用フィールドはsales向けOUTPUTへ追加しない。
 - チケット作成のINPUTには `tracker` として `inquiry`、`report`、`customer_visit` のいずれかを指定する。
 - Python側の旧 `backend.auth` と `backend.app` の主要importは移行期間中ファサード／aliasとして維持する。

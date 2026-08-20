@@ -1,9 +1,9 @@
 import { test, expect } from './fixtures'
 import {
   addComment,
-  answerTicket,
   claimTicket,
   createTicket,
+  expectStatus,
   openTicket,
   uniqueText,
   updateStatus,
@@ -28,7 +28,20 @@ test('営業とサポートが報告書と客先同行を別チケットで完�
   for (const { tracker, ticket } of tickets) {
     await claimTicket(supportPage, ticket.id, ticket.subject)
     await addComment(supportPage, uniqueText(`${tracker}-サポートコメント`))
-    await answerTicket(supportPage, uniqueText(`${tracker}-サポート回答`))
+
+    const completionLabel = tracker === '報告書'
+      ? '報告書を渡した'
+      : '予定・担当者をアサインした'
+    const unrelatedLabel = tracker === '報告書'
+      ? '予定・担当者をアサインした'
+      : '報告書を渡した'
+    const completion = supportPage.getByLabel(completionLabel)
+    await expect(completion).toBeVisible()
+    await expect(supportPage.getByLabel(unrelatedLabel)).toHaveCount(0)
+    await completion.check()
+    await supportPage.getByRole('button', { name: '対応情報を更新' }).click()
+    await expect(completion).toBeChecked()
+    await expectStatus(supportPage, '対応済')
 
     await openTicket(salesPage, ticket.id, ticket.subject)
     await addComment(salesPage, uniqueText(`${tracker}-営業クローズ確認コメント`))
