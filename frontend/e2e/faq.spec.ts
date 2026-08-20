@@ -2,7 +2,7 @@ import { test, expect } from './fixtures'
 import { uniqueText } from './workflow'
 
 const SAMPLE_QUESTION = '報告書が欲しいです'
-const SAMPLE_ANSWER = 'チケットを作成（既にやりとりするチケットがある場合は更新）し、報告書が必要にチェックを入れて対応情報を更新してください'
+const SAMPLE_ANSWER = '報告書チケットを作成し、対応情報を更新してください'
 
 test('営業担当が初期FAQを検索して詳細を表示できる @faq', async ({ salesPage }) => {
   await salesPage.goto('/faqs')

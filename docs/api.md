@@ -66,6 +66,8 @@ INPUTなし。セッションを削除してCookieを無効化します。OUTPUT
 | フィールド | 型 | 備考 |
 |---|---|---|
 | `id` | integer | Redmine issue ID |
+| `tracker` | `"inquiry"` / `"report"` / `"customer_visit"` | トラッカーキー |
+| `tracker_name` | string | 表示名（問い合わせ、報告書、客先同行） |
 | `subject`, `description`, `status` | string | 基本情報 |
 | `priority` | integer | Redmine優先度ID |
 | `priority_name` | string | 表示名 |
@@ -73,10 +75,8 @@ INPUTなし。セッションを削除してCookieを無効化します。OUTPUT
 | `latest_support_responder` | `{id, name}` / null | 回答者一覧でのみ返す |
 | `created_on`, `updated_on` | string | ISO 8601日時 |
 | `customer_id` | string | 顧客ID |
-| `report_required` | boolean | 報告書要否 |
-| `customer_visit_required` | boolean | 客先同行要否 |
-| `report_delivered` | boolean | `support` のみに返す |
-| `schedule_assigned` | boolean | `support` のみに返す |
+| `report_delivered` | boolean / null | 報告書トラッカーでのみ `support` に返す |
+| `schedule_assigned` | boolean / null | 客先同行トラッカーでのみ `support` に返す |
 | `notes` | array | 詳細取得で返す互換コメント一覧 |
 | `audit_log` | array | 詳細取得で返すコメント・変更履歴 |
 
@@ -88,17 +88,15 @@ INPUT `CreateTicketInput`:
 
 | フィールド | 型 | 必須 | 既定値／規則 |
 |---|---:|:---:|---|
+| `tracker` | `"inquiry"` / `"report"` / `"customer_visit"` | ✓ | 問い合わせ、報告書、客先同行のいずれかを選択 |
 | `subject` | string | ✓ | trim後に空不可 |
 | `description` | string | ✓ | trim後に空不可 |
 | `priority` | integer / null | | Redmine優先度ID |
 | `customer_id` | string | | `""` |
-| `report_required` | boolean | | `false` |
-| `customer_visit_required` | boolean | | `false` |
-| `report_delivered` | boolean | | `false`、supportのみ反映 |
-| `schedule_assigned` | boolean | | `false`、supportのみ反映 |
-| `tracker_id` | integer / null | | 廃止予定の互換入力。設定済み問い合わせトラッカーを常に使用 |
+| `report_delivered` | boolean | | `false`、報告書トラッカーでのみsupportが反映 |
+| `schedule_assigned` | boolean | | `false`、客先同行トラッカーでのみsupportが反映 |
 
-OUTPUTは `TicketOutput`。`report_required` または `customer_visit_required` が有効なら、指定優先度をRedmineの列挙順で1段階上げます。
+OUTPUTは `TicketOutput`。報告書と客先同行の両方を依頼する場合は、トラッカーごとに別の `POST /tickets` を実行します。
 
 ### `GET /tickets`
 
@@ -116,7 +114,7 @@ INPUTは `ticket_id`。OUTPUTは履歴を含む `TicketOutput`。
 
 | Method / Path | INPUT | OUTPUT | 主な規則 |
 |---|---|---|---|
-| `PATCH /tickets/{id}/custom-fields` | `UpdateCustomFieldsInput`（全項目optional、1項目以上） | `DetailOutput` | support専用項目をsalesが更新すると`403` |
+| `PATCH /tickets/{id}/custom-fields` | `UpdateCustomFieldsInput`（全項目optional、1項目以上） | `DetailOutput` | support専用項目をsalesが更新すると`403`。報告書渡し済みは報告書、予定・担当者アサイン済みは客先同行でのみ更新可 |
 | `POST /tickets/{id}/comments` | `{body: string}` | `DetailOutput` | trim後に空不可 |
 | `POST /tickets/{id}/answer` | `{body: string}` | `DetailOutput` | supportのみ。対応済み化して起票者へ戻す |
 | `PATCH /tickets/{id}/assignee` | なし | `DetailOutput` | supportのみ。自分へ割当て、対応中にする |

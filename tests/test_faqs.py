@@ -12,7 +12,7 @@ from backend.app import app, get_session_store
 
 
 QUESTION = "報告書が欲しいです"
-ANSWER = "チケットを作成し、報告書が必要にチェックを入れてください"
+ANSWER = "報告書チケットを作成し、対応情報を更新してください"
 
 
 def wiki_page(title: str, question: str = QUESTION, answer: str = ANSWER, version: int = 1):
@@ -68,7 +68,7 @@ def test_sales_can_list_search_and_view_faqs(client: TestClient):
     store.sessions["test-session"] = replace(store.sessions["test-session"], redmine_user_id=8)
     pages = {
         "FAQ_report_request": wiki_page("FAQ_report_request"),
-        "FAQ_visit": wiki_page("FAQ_visit", "客先に同行してほしいです", "客先同行が必要にチェックしてください"),
+        "FAQ_visit": wiki_page("FAQ_visit", "客先に同行してほしいです", "客先同行チケットを作成し、対応情報を更新してください"),
         "Home": {"title": "Home", "text": "通常のWikiページ"},
     }
     register_faq_routes(pages)

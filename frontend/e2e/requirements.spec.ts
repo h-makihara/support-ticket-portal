@@ -1,23 +1,13 @@
-import { test } from './fixtures'
-import {
-  answerTicket,
-  claimTicket,
-  createTicket,
-  enableRequirement,
-  openTicket,
-  uniqueText,
-} from './workflow'
+import { test, expect } from './fixtures'
+import { createTicket, uniqueText } from './workflow'
 
-for (const requirement of ['報告書が必要', '客先同行が必要'] as const) {
-  test(`営業担当が「${requirement}」を反映すると再対応待ちになる @requirements`, async ({
-    salesPage,
-    supportPage,
-  }) => {
-    const ticket = await createTicket(salesPage)
-    await claimTicket(supportPage, ticket.id, ticket.subject)
-    await answerTicket(supportPage, uniqueText('事前回答'))
+for (const tracker of ['報告書', '客先同行'] as const) {
+  test(`営業担当が「${tracker}」トラッカーのチケットを作成できる @requirements`, async ({ salesPage }) => {
+    const ticket = await createTicket(salesPage, uniqueText(`E2E-${tracker}`), tracker)
 
-    await openTicket(salesPage, ticket.id, ticket.subject)
-    await enableRequirement(salesPage, requirement)
+    await expect(salesPage.getByText(`トラッカー: ${tracker}`, { exact: true })).toBeVisible()
+    await salesPage.goto('/')
+    const row = salesPage.getByRole('row').filter({ hasText: ticket.subject })
+    await expect(row).toContainText(tracker)
   })
 }

@@ -277,10 +277,10 @@ class TestGetTicket:
         assert data["assignee"] == {"id": 7, "name": "Test User"}
         assert data["tracker"] == "report"
         assert data["tracker_name"] == "報告書"
-        assert "report_required" not in data
-        assert "customer_visit_required" not in data
+        assert {"id", "tracker", "tracker_name", "subject", "description", "status",
+                "priority", "priority_name", "assignee", "customer_id", "report_delivered",
+                "notes", "audit_log"} <= set(data)
         assert data["report_delivered"] is False
-        assert "schedule_assigned" not in data
         assert "audit_log" in data
 
     def test_get_ticket_has_journals(self, client: TestClient):

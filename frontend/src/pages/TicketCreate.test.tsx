@@ -26,7 +26,7 @@ beforeEach(() => {
 })
 
 describe('TicketCreate', () => {
-  it('selects a tracker and submits it without legacy requirement controls', async () => {
+  it('submits the selected tracker', async () => {
     render(
       <MemoryRouter>
         <TicketCreate user={{ id: 1, username: 'sales', name: '営業', roles: ['sales'] }} />
@@ -50,7 +50,5 @@ describe('TicketCreate', () => {
       subject: '月次報告書',
       description: '作成してください',
     })))
-    expect(screen.queryByLabelText('報告書が必要')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('客先同行が必要')).not.toBeInTheDocument()
   })
 })

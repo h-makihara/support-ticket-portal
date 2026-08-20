@@ -6,8 +6,7 @@ Redmine をチケット基盤として利用する、社内問い合わせ向け
 
 - Redmine アカウントによるログイン
 - チケットの一覧・ステータス絞り込み・ページネーション・手動更新
-- チケット作成、コメント追加、ステータス／優先度変更
-- 報告書または客先同行が必要なチケットの優先度自動引き上げ
+- 問い合わせ・報告書・客先同行トラッカーを選択したチケット作成、コメント追加、ステータス／優先度変更
 - 回答者向けキューと「自分が対応する」操作
 - 回答者向けキューでの現在／前回対応者表示
 - コメントと項目変更をまとめた監査ログ
@@ -38,7 +37,7 @@ python3 scripts/init_redmine.py
 docker compose up --build -d
 ```
 
-初期化スクリプトが `.env` に Redmine API キー、プロジェクト ID、トラッカー IDを書き込みます。起動後は http://localhost:3001 を開き、Redmine アカウントでログインします。
+初期化スクリプトが `.env` に Redmine API キーとプロジェクト IDを書き込み、問い合わせ・報告書・客先同行の3トラッカーを確認します。起動後は http://localhost:3001 を開き、Redmine アカウントでログインします。
 
 一括セットアップを行う場合は、次のスクリプトも利用できます。
 
@@ -104,7 +103,6 @@ custom Namespaceは同じenvironmentの並行コピーを作るためには使�
 |---|---|
 | `REDMINE_API_KEY` | 起動時のステータス・メンバー情報取得に使う管理用 API キー |
 | `REDMINE_PROJECT_ID` | 対象 Redmine プロジェクト |
-| `REDMINE_TRACKER_ID` | 問い合わせトラッカー |
 | `REDMINE_SECRET_KEY_BASE` | Redmine の暗号化用シークレット |
 | `SESSION_COOKIE_SECURE` | HTTPS 環境では `true` |
 | `ENABLE_TEST_USERS` | ローカル検証ユーザーを作る場合のみ `true` |

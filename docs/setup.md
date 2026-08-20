@@ -21,7 +21,7 @@ python3 scripts/init_redmine.py
 docker compose up --build -d
 ```
 
-`scripts/init_redmine.py` は Redmine の REST API を有効化したうえで、問い合わせプロジェクト・トラッカー・ロールを確認し、実行時に必要な ID と API キーを `.env` へ保存します。
+`scripts/init_redmine.py` は Redmine の REST API を有効化したうえで、問い合わせプロジェクト、問い合わせ・報告書・客先同行トラッカー、ロールを確認し、実行時に必要なプロジェクト ID と API キーを `.env` へ保存します。トラッカー ID 用の環境変数は不要です。
 
 `HTTP_PROXY` / `HTTPS_PROXY` が設定された環境にも対応しています。リモート Redmine へは環境のプロキシを利用し、`localhost` およびループバック IP への初期化通信は認証情報をプロキシへ送らず直接接続します。
 

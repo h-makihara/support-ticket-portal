@@ -1,6 +1,7 @@
 import { expect, Page } from '@playwright/test'
 
 type LoginCredentials = { username: string; password: string }
+export type TrackerLabel = '問い合わせ' | '報告書' | '客先同行'
 
 export function uniqueText(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -14,8 +15,17 @@ export async function login(page: Page, credentials: LoginCredentials) {
   await expect(page.getByRole('navigation', { name: 'メインナビゲーション' })).toBeVisible()
 }
 
-export async function createTicket(page: Page, subject = uniqueText('E2E-ticket')) {
+export async function selectTracker(page: Page, tracker: TrackerLabel) {
+  await page.getByLabel('トラッカー', { exact: true }).selectOption({ label: tracker })
+}
+
+export async function createTicket(
+  page: Page,
+  subject = uniqueText('E2E-ticket'),
+  tracker: TrackerLabel = '問い合わせ',
+) {
   await page.goto('/create')
+  await selectTracker(page, tracker)
   await page.getByPlaceholder('件名を入力...').fill(subject)
   await page.getByPlaceholder('問い合わせ内容を入力...').fill(`E2E本文: ${subject}`)
   await page.getByLabel('顧客ID').fill(uniqueText('customer'))
@@ -67,17 +77,6 @@ export async function answerTicket(page: Page, body: string) {
   await answerButton.click()
   await expect(page.getByText(body, { exact: true })).toBeVisible()
   await expectStatus(page, '対応済')
-}
-
-export async function enableRequirement(
-  page: Page,
-  label: '報告書が必要' | '客先同行が必要',
-) {
-  const checkbox = page.getByLabel(label, { exact: true })
-  await checkbox.check()
-  await page.getByRole('button', { name: '対応情報を更新' }).click()
-  await expect(checkbox).toBeChecked()
-  await expectStatus(page, '対応待ち')
 }
 
 export async function updateStatus(page: Page, label: 'クローズ待ち' | 'クローズ') {

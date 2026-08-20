@@ -29,7 +29,7 @@ def test_session_output_cannot_expose_redmine_credentials():
     assert "password" not in serialized
 
 
-def test_ticket_contract_uses_tracker_keys_without_legacy_requirement_fields():
+def test_ticket_contract_uses_tracker_keys_and_matching_completion_fields():
     schemas = app.openapi()["components"]["schemas"]
     create = schemas["CreateTicketInput"]
     output = schemas["TicketOutput"]
@@ -41,8 +41,17 @@ def test_ticket_contract_uses_tracker_keys_without_legacy_requirement_fields():
         "report",
         "customer_visit",
     ]
+    assert set(create["properties"]) == {
+        "tracker", "subject", "description", "priority", "customer_id",
+        "report_delivered", "schedule_assigned",
+    }
     assert {"tracker", "tracker_name"} <= set(output["required"])
-    for schema in (create, output, update):
-        assert "report_required" not in schema["properties"]
-        assert "customer_visit_required" not in schema["properties"]
-    assert "tracker_id" not in create["properties"]
+    assert set(output["properties"]) == {
+        "id", "tracker", "tracker_name", "subject", "description", "status",
+        "priority", "priority_name", "assignee", "latest_support_responder",
+        "created_on", "updated_on", "notes", "audit_log", "customer_id",
+        "report_delivered", "schedule_assigned",
+    }
+    assert set(update["properties"]) == {
+        "customer_id", "report_delivered", "schedule_assigned",
+    }
