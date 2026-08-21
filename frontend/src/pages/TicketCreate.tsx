@@ -1,57 +1,89 @@
-import { useEffect, useState, type SubmitEvent } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import { AuthUser, createTicket, getTicketPriorityOptions, TicketPriorityOption, TrackerKey } from '../api/client'
-import { normalizePriorityName } from '../priority'
+import { useEffect, useState, type SubmitEvent } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import {
+  AuthUser,
+  createTicket,
+  getTicketPriorityOptions,
+  TicketPriorityOption,
+  TrackerKey,
+} from "../api/client";
+import { normalizePriorityName } from "../priority";
 
 export function TicketCreate({ user }: { user: AuthUser }) {
-  const navigate = useNavigate()
-  const [subject, setSubject] = useState('')
-  const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState<number | null>(null)
-  const [priorityOptions, setPriorityOptions] = useState<TicketPriorityOption[]>([])
-  const [customerId, setCustomerId] = useState('')
-  const [tracker, setTracker] = useState<TrackerKey>('inquiry')
-  const [reportDelivered, setReportDelivered] = useState(false)
-  const [scheduleAssigned, setScheduleAssigned] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const navigate = useNavigate();
+  const [subject, setSubject] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState<number | null>(null);
+  const [priorityOptions, setPriorityOptions] = useState<
+    TicketPriorityOption[]
+  >([]);
+  const [customerId, setCustomerId] = useState("");
+  const [tracker, setTracker] = useState<TrackerKey>("inquiry");
+  const [reportDelivered, setReportDelivered] = useState(false);
+  const [scheduleAssigned, setScheduleAssigned] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getTicketPriorityOptions()
-      .then(options => {
-        setPriorityOptions(options)
-        setPriority(options.find(option => option.is_default)?.id ?? options[0]?.id ?? null)
+      .then((options) => {
+        setPriorityOptions(options);
+        setPriority(
+          options.find((option) => option.is_default)?.id ??
+            options[0]?.id ??
+            null,
+        );
       })
-      .catch(e => setError(e instanceof Error ? e.message : '優先度設定の取得に失敗しました'))
-  }, [])
+      .catch((e) =>
+        setError(
+          e instanceof Error ? e.message : "優先度設定の取得に失敗しました",
+        ),
+      );
+  }, []);
 
   const handleSubmit = async (e: SubmitEvent<HTMLFormElement>) => {
-    e.preventDefault()
+    e.preventDefault();
     if (!subject.trim() || !description.trim() || priority === null) {
-      setError(priority === null ? '優先度を選択してください' : '件名と本文は必須です')
-      return
+      setError(
+        priority === null ? "優先度を選択してください" : "件名と本文は必須です",
+      );
+      return;
     }
-    setLoading(true)
-    setError(null) // Clear previous errors on new submit
+    setLoading(true);
+    setError(null); // Clear previous errors on new submit
     try {
       const ticket = await createTicket({
-        tracker, subject, description, priority,
+        tracker,
+        subject,
+        description,
+        priority,
         customer_id: customerId,
-        ...(tracker === 'report' ? { report_delivered: reportDelivered } : {}),
-        ...(tracker === 'customer_visit' ? { schedule_assigned: scheduleAssigned } : {}),
-      })
-      navigate(`/tickets/${ticket.id}`)
+        ...(tracker === "report" ? { report_delivered: reportDelivered } : {}),
+        ...(tracker === "customer_visit"
+          ? { schedule_assigned: scheduleAssigned }
+          : {}),
+      });
+      navigate(`/tickets/${ticket.id}`);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'チケットの作成に失敗しました'
-      setError(msg)
+      const msg =
+        e instanceof Error ? e.message : "チケットの作成に失敗しました";
+      setError(msg);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <div>
-      <Link to="/" style={{ display: 'inline-block', marginBottom: '1rem', color: '#3498db', textDecoration: 'none' }}>
+      <Link
+        to="/"
+        style={{
+          display: "inline-block",
+          marginBottom: "1rem",
+          color: "#3498db",
+          textDecoration: "none",
+        }}
+      >
         ← 一覧に戻る
       </Link>
 
@@ -60,15 +92,28 @@ export function TicketCreate({ user }: { user: AuthUser }) {
 
         {/* Error State with retry option */}
         {error && (
-          <div style={{ padding: '0.8rem', backgroundColor: '#ffeaea', border: '1px solid #ffcccc', borderRadius: '4px', marginTop: '1rem' }}>
+          <div
+            style={{
+              padding: "0.8rem",
+              backgroundColor: "#ffeaea",
+              border: "1px solid #ffcccc",
+              borderRadius: "4px",
+              marginTop: "1rem",
+            }}
+          >
             <strong>エラー:</strong> {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} style={{ marginTop: '1rem' }}>
+        <form onSubmit={handleSubmit} style={{ marginTop: "1rem" }}>
           <div className="form-group">
-            <label htmlFor="tracker">トラッカー</label>
-            <select id="tracker" value={tracker} onChange={e => setTracker(e.target.value as TrackerKey)} disabled={loading}>
+            <label htmlFor="tracker">依頼内容</label>
+            <select
+              id="tracker"
+              value={tracker}
+              onChange={(e) => setTracker(e.target.value as TrackerKey)}
+              disabled={loading}
+            >
               <option value="inquiry">問い合わせ</option>
               <option value="report">報告書</option>
               <option value="customer_visit">客先同行</option>
@@ -80,7 +125,7 @@ export function TicketCreate({ user }: { user: AuthUser }) {
             <input
               type="text"
               value={subject}
-              onChange={e => setSubject(e.target.value)}
+              onChange={(e) => setSubject(e.target.value)}
               placeholder="件名を入力..."
               disabled={loading}
             />
@@ -90,7 +135,7 @@ export function TicketCreate({ user }: { user: AuthUser }) {
             <label>本文</label>
             <textarea
               value={description}
-              onChange={e => setDescription(e.target.value)}
+              onChange={(e) => setDescription(e.target.value)}
               placeholder="問い合わせ内容を入力..."
               rows={8}
               disabled={loading}
@@ -100,35 +145,68 @@ export function TicketCreate({ user }: { user: AuthUser }) {
           <div className="form-group">
             <label>優先度</label>
             <select
-              value={priority ?? ''}
-              onChange={e => setPriority(parseInt(e.target.value))}
+              value={priority ?? ""}
+              onChange={(e) => setPriority(parseInt(e.target.value))}
               disabled={loading}
             >
-              {priorityOptions.map(opt => (
-                <option key={opt.id} value={opt.id}>{normalizePriorityName(opt.label)}</option>
+              {priorityOptions.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {normalizePriorityName(opt.label)}
+                </option>
               ))}
             </select>
           </div>
 
           <div className="form-group">
             <label htmlFor="customer-id">顧客ID</label>
-            <input id="customer-id" type="text" value={customerId} onChange={e => setCustomerId(e.target.value)} disabled={loading} />
+            <input
+              id="customer-id"
+              type="text"
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              disabled={loading}
+            />
           </div>
 
           <div className="custom-field-checks">
-            {user.roles.includes('support') && tracker === 'report' && (
-              <label><input type="checkbox" checked={reportDelivered} onChange={e => setReportDelivered(e.target.checked)} disabled={loading} /> 報告書を渡した</label>
+            {user.roles.includes("support") && tracker === "report" && (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={reportDelivered}
+                  onChange={(e) => setReportDelivered(e.target.checked)}
+                  disabled={loading}
+                />{" "}
+                報告書を渡した
+              </label>
             )}
-            {user.roles.includes('support') && tracker === 'customer_visit' && (
-              <label><input type="checkbox" checked={scheduleAssigned} onChange={e => setScheduleAssigned(e.target.checked)} disabled={loading} /> 予定・担当者をアサインした</label>
+            {user.roles.includes("support") && tracker === "customer_visit" && (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={scheduleAssigned}
+                  onChange={(e) => setScheduleAssigned(e.target.checked)}
+                  disabled={loading}
+                />{" "}
+                予定・担当者をアサインした
+              </label>
             )}
           </div>
 
-          <button className="btn btn-primary" type="submit" disabled={loading || priority === null || !subject.trim() || !description.trim()}>
-            {loading ? '作成中...' : '作成する'}
+          <button
+            className="btn btn-primary"
+            type="submit"
+            disabled={
+              loading ||
+              priority === null ||
+              !subject.trim() ||
+              !description.trim()
+            }
+          >
+            {loading ? "作成中..." : "作成する"}
           </button>
         </form>
       </div>
     </div>
-  )
+  );
 }
