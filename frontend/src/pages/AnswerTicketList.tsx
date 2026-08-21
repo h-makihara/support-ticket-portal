@@ -140,7 +140,7 @@ export function AnswerTicketList() {
                 <th>ステータス</th>
                 <th>優先度</th>
                 <th>対応者</th>
-                <th>前回対応者</th>
+                <th>前回担当</th>
                 <th>作成日</th>
                 <th>最終更新日</th>
                 <th>操作</th>
