@@ -36,7 +36,7 @@ portal_release_conflict_messages() {
   local release inventory namespaces namespace found=1
 
   for release in "$PORTAL_RELEASE" "$PORTAL_TRAEFIK_RELEASE"; do
-    if ! inventory="$(helm list --all-namespaces --all --filter "^${release}$" --output json 2>&1)"; then
+    if ! inventory="$(helm list --all-namespaces --filter "^${release}$" --output json 2>&1)"; then
       echo "failed to inspect Helm releases for $release: $inventory" >&2
       return 2
     fi
