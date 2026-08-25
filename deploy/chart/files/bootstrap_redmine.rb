@@ -151,6 +151,7 @@ custom_field_definitions.each do |name, format, default_value, required, support
   custom_field.default_value = default_value
   custom_field.is_required = required
   custom_field.possible_values = possible_values if format == "list"
+  custom_field.multiple = false if format == "list"
   custom_field.is_for_all = false
   custom_field.trackers = field_tracker_names.map { |name| trackers.fetch(name) }
   custom_field.projects = [project]
@@ -241,6 +242,7 @@ custom_field_definitions.each do |name, format, _default_value, required, _suppo
   if format == "list" && custom_field.possible_values != possible_values
     abort "Custom field #{name} has the wrong possible values"
   end
+  abort "Custom field #{name} must allow one value" if format == "list" && custom_field.multiple?
   unless custom_field.trackers.pluck(:name).sort == field_tracker_names.sort
     abort "Custom field #{name} has incomplete tracker associations"
   end

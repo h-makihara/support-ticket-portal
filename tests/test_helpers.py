@@ -46,6 +46,19 @@ class TestIssueToDict:
         assert result["created_on"] == ""
         assert result["assignee"] is None
 
+    def test_customer_visit_normalizes_missing_visit_mode_to_none(self):
+        redmine_issue = {
+            "id": 457,
+            "subject": "Legacy visit",
+            "description": "",
+            "tracker": {"id": 5, "name": "客先同行"},
+            "status": {"id": 1, "name": "New"},
+            "priority": {"id": 3, "name": "Normal"},
+            "custom_fields": [{"id": 17, "name": "同行方法", "value": ""}],
+        }
+
+        assert _issue_to_dict(redmine_issue)["visit_mode"] is None
+
 
 class TestJournalsToNotes:
     """テストケース: journals → notes 変換"""

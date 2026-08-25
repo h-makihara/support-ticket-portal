@@ -150,6 +150,7 @@ visit_mode = IssueCustomField.find_by!(name: "同行方法")
 assert_test(visit_mode.field_format == "list", "visit mode field format")
 assert_test(visit_mode.possible_values == ["オンライン", "オフライン"], "visit mode options")
 assert_test(visit_mode.is_required?, "visit mode must be required")
+assert_test(!visit_mode.multiple?, "visit mode must allow only one choice")
 
 ["営業担当者", "サポート担当者"].each do |role_name|
   role = Role.find_by!(name: role_name)

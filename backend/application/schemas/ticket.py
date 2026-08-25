@@ -84,7 +84,7 @@ class TicketOutput(BaseModel):
     customer_id: str
     report_delivered: bool | None = None
     schedule_assigned: bool | None = None
-    visit_mode: str | None = None
+    visit_mode: VisitMode | None = None
 
 
 class TicketListOutput(BaseModel):

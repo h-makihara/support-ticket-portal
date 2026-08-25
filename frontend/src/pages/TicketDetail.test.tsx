@@ -127,6 +127,37 @@ describe("TicketDetail tracker controls", () => {
     expect(screen.queryByLabelText("同行方法")).not.toBeInTheDocument();
   });
 
+  it.each(["オンライン", undefined])(
+    "lets sales update customer ID without resending visit mode (%s)",
+    async (visitMode) => {
+      getTicketMock.mockResolvedValue({
+        ...ticket("customer_visit", "客先同行"),
+        visit_mode: visitMode,
+      });
+      renderTicketDetail({
+        id: 2,
+        username: "sales",
+        name: "営業",
+        roles: ["sales"],
+      });
+
+      fireEvent.change(await screen.findByLabelText("顧客ID"), {
+        target: { value: "C-200" },
+      });
+      const updateButton = screen.getByRole("button", {
+        name: "対応情報を更新",
+      });
+      expect(updateButton).toBeEnabled();
+      fireEvent.click(updateButton);
+
+      await waitFor(() =>
+        expect(updateTicketCustomFieldsMock).toHaveBeenCalledWith(1, {
+          customer_id: "C-200",
+        }),
+      );
+    },
+  );
+
   it("requires support users to select a missing visit mode before updating", async () => {
     getTicketMock.mockResolvedValue({
       ...ticket("customer_visit", "客先同行"),

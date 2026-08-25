@@ -59,7 +59,7 @@ export function TicketDetail({ user }: { user: AuthUser }) {
         ...(t.tracker === "report"
           ? { report_delivered: t.report_delivered }
           : {}),
-        ...(t.tracker === "customer_visit"
+        ...(t.tracker === "customer_visit" && user.roles.includes("support")
           ? { schedule_assigned: t.schedule_assigned, visit_mode: t.visit_mode }
           : {}),
       });
@@ -319,7 +319,9 @@ export function TicketDetail({ user }: { user: AuthUser }) {
             onClick={handleCustomFields}
             disabled={
               submitting ||
-              (ticket.tracker === "customer_visit" && !customFields.visit_mode)
+              (user.roles.includes("support") &&
+                ticket.tracker === "customer_visit" &&
+                !customFields.visit_mode)
             }
           >
             対応情報を更新

@@ -70,7 +70,7 @@ export interface Ticket {
   customer_id: string
   report_delivered?: boolean
   schedule_assigned?: boolean
-  visit_mode?: VisitMode
+  visit_mode?: VisitMode | null
 }
 
 export type TrackerKey = 'inquiry' | 'report' | 'customer_visit'
