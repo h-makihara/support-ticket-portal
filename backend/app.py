@@ -202,6 +202,7 @@ CUSTOM_FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "customer_id": {"name": "顧客ID", "label": "顧客ID", "boolean": False, "support_only": False},
     "report_delivered": {"name": "報告書渡し済み", "label": "報告書を渡した", "boolean": True, "support_only": True},
     "schedule_assigned": {"name": "予定・担当者アサイン済み", "label": "予定・担当者をアサインした", "boolean": True, "support_only": True},
+    "visit_mode": {"name": "同行方法", "label": "同行方法", "boolean": False, "support_only": False},
 }
 
 FAQ_PAGE_PREFIX = "FAQ_"
@@ -1116,6 +1117,10 @@ async def create_ticket(
                 status_code=422,
                 content={"detail": "subject and description are required"},
             )
+        if ticket_data.tracker == "customer_visit" and ticket_data.visit_mode is None:
+            raise HTTPException(status_code=422, detail="客先同行では同行方法を選択してください")
+        if ticket_data.tracker != "customer_visit" and ticket_data.visit_mode is not None:
+            raise HTTPException(status_code=422, detail="同行方法は客先同行でのみ指定できます")
 
         roles = await _required_user_roles(session.redmine_user_id)
         field_values = {
@@ -1125,6 +1130,8 @@ async def create_ticket(
             field_values["report_delivered"] = ticket_data.report_delivered
         elif ROLE_SUPPORT in roles and ticket_data.tracker == "customer_visit":
             field_values["schedule_assigned"] = ticket_data.schedule_assigned
+        if ticket_data.tracker == "customer_visit":
+            field_values["visit_mode"] = ticket_data.visit_mode
         field_ids = await _custom_field_ids()
         payload = {
             "issue": {
@@ -1382,10 +1389,13 @@ async def update_custom_fields(
     values = field_data.model_dump(exclude_unset=True)
     if not values:
         raise HTTPException(status_code=422, detail="更新するカスタムフィールドがありません")
+    if "visit_mode" in values and values["visit_mode"] is None:
+        raise HTTPException(status_code=422, detail="同行方法は必須です")
 
     roles = await _required_user_roles(session.redmine_user_id)
-    if ROLE_SUPPORT not in roles and any(
-        CUSTOM_FIELD_DEFINITIONS[key]["support_only"] for key in values
+    if ROLE_SUPPORT not in roles and (
+        "visit_mode" in values
+        or any(CUSTOM_FIELD_DEFINITIONS[key]["support_only"] for key in values)
     ):
         raise HTTPException(status_code=403, detail="サポートロールが必要です")
     if "customer_id" in values:
@@ -1398,7 +1408,8 @@ async def update_custom_fields(
             values.get(key) is True for key in AUTHOR_REASSIGNMENT_FIELDS
         )
         current_issue = None
-        if AUTHOR_REASSIGNMENT_FIELDS.intersection(values):
+        tracker_specific_fields = AUTHOR_REASSIGNMENT_FIELDS | {"visit_mode"}
+        if tracker_specific_fields.intersection(values):
             current_response = await client.get(f"/issues/{ticket_id}.json")
             if current_response.status_code != 200:
                 return JSONResponse(
@@ -1410,8 +1421,9 @@ async def update_custom_fields(
             expected_trackers = {
                 "report_delivered": "報告書",
                 "schedule_assigned": "客先同行",
+                "visit_mode": "客先同行",
             }
-            for field in AUTHOR_REASSIGNMENT_FIELDS.intersection(values):
+            for field in tracker_specific_fields.intersection(values):
                 expected_tracker = expected_trackers[field]
                 if tracker_name != expected_tracker:
                     raise HTTPException(

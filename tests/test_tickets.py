@@ -48,11 +48,14 @@ class TestCreateTicket:
     def test_create_ticket_maps_allowed_tracker_key(
         self, client: TestClient, tracker: str, tracker_id: int
     ):
-        response = client.post("/tickets", json={
+        payload = {
             "tracker": tracker,
             "subject": "新規依頼",
             "description": "詳細",
-        })
+        }
+        if tracker == "customer_visit":
+            payload["visit_mode"] = "オンライン"
+        response = client.post("/tickets", json=payload)
         assert response.status_code == 200
         request = next(
             call.request for call in respx.calls
@@ -145,6 +148,7 @@ class TestCreateTicket:
         ("customer_visit", [
             {"id": 11, "value": "C-100"},
             {"id": 15, "value": "1"},
+            {"id": 17, "value": "オンライン"},
         ]),
     ])
     def test_create_ticket_sends_only_tracker_specific_custom_fields(
@@ -157,6 +161,7 @@ class TestCreateTicket:
             "customer_id": "C-100",
             "report_delivered": True,
             "schedule_assigned": True,
+            **({"visit_mode": "オンライン"} if tracker == "customer_visit" else {}),
         })
         assert response.status_code == 200
         request = next(
@@ -164,6 +169,48 @@ class TestCreateTicket:
             if call.request.method == "POST" and call.request.url.path == "/issues.json"
         )
         assert json.loads(request.content)["issue"]["custom_fields"] == expected_fields
+
+    def test_customer_visit_requires_visit_mode(self, client: TestClient):
+        response = client.post("/tickets", json={
+            "tracker": "customer_visit",
+            "subject": "訪問依頼",
+            "description": "同行をお願いします",
+        })
+
+        assert response.status_code == 422
+        assert not any(
+            call.request.method == "POST" and call.request.url.path == "/issues.json"
+            for call in respx.calls
+        )
+
+    def test_customer_visit_sends_visit_mode(self, client: TestClient):
+        response = client.post("/tickets", json={
+            "tracker": "customer_visit",
+            "subject": "訪問依頼",
+            "description": "同行をお願いします",
+            "visit_mode": "オンライン",
+        })
+
+        assert response.status_code == 200
+        request = next(
+            call.request for call in respx.calls
+            if call.request.method == "POST" and call.request.url.path == "/issues.json"
+        )
+        assert {"id": 17, "value": "オンライン"} in json.loads(request.content)["issue"]["custom_fields"]
+
+    def test_non_customer_visit_rejects_visit_mode(self, client: TestClient):
+        response = client.post("/tickets", json={
+            "tracker": "inquiry",
+            "subject": "問い合わせ",
+            "description": "本文",
+            "visit_mode": "オンライン",
+        })
+
+        assert response.status_code == 422
+        assert not any(
+            call.request.method == "POST" and call.request.url.path == "/issues.json"
+            for call in respx.calls
+        )
 
     def test_create_ticket_missing_subject(self, client: TestClient):
         """異常系: subject が省略されていると422エラー"""
@@ -552,6 +599,57 @@ class TestCustomFields:
             {"id": 11, "value": "C-200"},
             {"id": 13, "value": "1"},
         ], "status_id": 3, "assigned_to_id": 8}}
+
+    def test_support_updates_customer_visit_mode(self, client: TestClient):
+        detail = client.get("/tickets/101")
+        assert detail.json()["visit_mode"] == "オンライン"
+
+        response = client.patch(
+            "/tickets/101/custom-fields", json={"visit_mode": "オフライン"}
+        )
+
+        assert response.status_code == 200
+        update_request = next(
+            call.request for call in reversed(respx.calls)
+            if call.request.method == "PUT" and call.request.url.path == "/issues/101.json"
+        )
+        assert json.loads(update_request.content) == {
+            "issue": {"custom_fields": [{"id": 17, "value": "オフライン"}]}
+        }
+
+    def test_visit_mode_update_requires_customer_visit_tracker(self, client: TestClient):
+        response = client.patch(
+            "/tickets/100/custom-fields", json={"visit_mode": "オフライン"}
+        )
+
+        assert response.status_code == 422
+        assert not any(
+            call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
+            for call in respx.calls
+        )
+
+    def test_sales_cannot_update_visit_mode(self, client: TestClient):
+        store = app.dependency_overrides[get_session_store]()
+        store.sessions["test-session"] = replace(
+            store.sessions["test-session"], redmine_user_id=8
+        )
+
+        response = client.patch(
+            "/tickets/101/custom-fields", json={"visit_mode": "オフライン"}
+        )
+
+        assert response.status_code == 403
+
+    def test_support_cannot_clear_visit_mode(self, client: TestClient):
+        response = client.patch(
+            "/tickets/101/custom-fields", json={"visit_mode": None}
+        )
+
+        assert response.status_code == 422
+        assert not any(
+            call.request.method == "PUT" and call.request.url.path == "/issues/101.json"
+            for call in respx.calls
+        )
 
     @pytest.mark.parametrize("ticket_id, field_name, field_id", [
         (100, "report_delivered", 13),

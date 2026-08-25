@@ -14,6 +14,11 @@ for (const tracker of ["報告書", "客先同行"] as const) {
     await expect(
       salesPage.getByText(`依頼内容: ${tracker}`, { exact: true }),
     ).toBeVisible();
+    if (tracker === "客先同行") {
+      await expect(
+        salesPage.getByText("同行方法: オンライン", { exact: true }),
+      ).toBeVisible();
+    }
     await salesPage.goto("/");
     const row = salesPage.getByRole("row").filter({ hasText: ticket.subject });
     await expect(row).toContainText(tracker);

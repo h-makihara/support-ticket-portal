@@ -194,6 +194,7 @@ def mock_redmine_api():
                 {"id": 11, "name": "顧客ID"},
                 {"id": 13, "name": "報告書渡し済み"},
                 {"id": 15, "name": "予定・担当者アサイン済み"},
+                {"id": 17, "name": "同行方法"},
             ]})
         )
 
@@ -271,6 +272,7 @@ def mock_redmine_api():
                 detail["issue"]["custom_fields"] = [
                     {"id": 11, "name": "顧客ID", "value": "C-101"},
                     {"id": 15, "name": "予定・担当者アサイン済み", "value": "0"},
+                    {"id": 17, "name": "同行方法", "value": "オンライン"},
                 ]
             return httpx.Response(200, json=detail)
 

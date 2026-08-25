@@ -30,6 +30,9 @@ export async function createTicket(
 ) {
   await page.goto("/create");
   await selectTracker(page, tracker);
+  if (tracker === "客先同行") {
+    await page.getByLabel("同行方法").selectOption("オンライン");
+  }
   await page.getByPlaceholder("件名を入力...").fill(subject);
   await page
     .getByPlaceholder("問い合わせ内容を入力...")

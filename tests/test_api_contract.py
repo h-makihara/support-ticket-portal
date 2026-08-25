@@ -45,15 +45,15 @@ def test_ticket_contract_uses_tracker_keys_and_matching_completion_fields():
     ]
     assert set(create["properties"]) == {
         "tracker", "subject", "description", "priority", "customer_id",
-        "report_delivered", "schedule_assigned",
+        "report_delivered", "schedule_assigned", "visit_mode",
     }
     assert {"tracker", "tracker_name"} <= set(output["required"])
     assert set(output["properties"]) == {
         "id", "tracker", "tracker_name", "subject", "description", "status",
         "priority", "priority_name", "assignee", "latest_support_responder",
         "created_on", "updated_on", "notes", "audit_log", "customer_id",
-        "report_delivered", "schedule_assigned",
+        "report_delivered", "schedule_assigned", "visit_mode",
     }
     assert set(update["properties"]) == {
-        "customer_id", "report_delivered", "schedule_assigned",
+        "customer_id", "report_delivered", "schedule_assigned", "visit_mode",
     }

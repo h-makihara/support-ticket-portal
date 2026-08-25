@@ -3,7 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.application.schemas.common import PaginationOutput
-from backend.domain.models.ticket import TrackerKey
+from backend.domain.models.ticket import TrackerKey, VisitMode
 
 
 class CreateTicketInput(BaseModel):
@@ -16,6 +16,7 @@ class CreateTicketInput(BaseModel):
     customer_id: str = ""
     report_delivered: bool = Field(default=False, description="サポートロールのみ反映")
     schedule_assigned: bool = Field(default=False, description="サポートロールのみ反映")
+    visit_mode: VisitMode | None = Field(default=None, description="客先同行で必須")
 
 
 class UpdateCustomFieldsInput(BaseModel):
@@ -24,6 +25,7 @@ class UpdateCustomFieldsInput(BaseModel):
     customer_id: str | None = None
     report_delivered: bool | None = None
     schedule_assigned: bool | None = None
+    visit_mode: VisitMode | None = None
 
 
 class AddCommentInput(BaseModel):
@@ -82,6 +84,7 @@ class TicketOutput(BaseModel):
     customer_id: str
     report_delivered: bool | None = None
     schedule_assigned: bool | None = None
+    visit_mode: str | None = None
 
 
 class TicketListOutput(BaseModel):

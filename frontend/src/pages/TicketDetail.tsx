@@ -15,6 +15,7 @@ import {
   TicketPriorityOption,
   AuditEntry,
   TicketCustomFields,
+  VisitMode,
 } from "../api/client";
 import {
   normalizePriorityName,
@@ -59,7 +60,7 @@ export function TicketDetail({ user }: { user: AuthUser }) {
           ? { report_delivered: t.report_delivered }
           : {}),
         ...(t.tracker === "customer_visit"
-          ? { schedule_assigned: t.schedule_assigned }
+          ? { schedule_assigned: t.schedule_assigned, visit_mode: t.visit_mode }
           : {}),
       });
       setAuditLog(t.audit_log ?? []);
@@ -257,6 +258,29 @@ export function TicketDetail({ user }: { user: AuthUser }) {
               }
             />
           </div>
+          {ticket.tracker === "customer_visit" &&
+            (user.roles.includes("support") ? (
+              <div className="form-group">
+                <label htmlFor="visit-mode">同行方法</label>
+                <select
+                  id="visit-mode"
+                  value={customFields.visit_mode ?? ""}
+                  onChange={(e) =>
+                    setCustomFields({
+                      ...customFields,
+                      visit_mode: e.target.value as VisitMode,
+                    })
+                  }
+                  required
+                >
+                  <option value="">選択してください</option>
+                  <option value="オンライン">オンライン</option>
+                  <option value="オフライン">オフライン</option>
+                </select>
+              </div>
+            ) : (
+              <p>同行方法: {ticket.visit_mode || "未設定"}</p>
+            ))}
           <div className="custom-field-checks">
             {user.roles.includes("support") && ticket.tracker === "report" && (
               <label>
@@ -293,7 +317,10 @@ export function TicketDetail({ user }: { user: AuthUser }) {
           <button
             className="btn btn-success"
             onClick={handleCustomFields}
-            disabled={submitting}
+            disabled={
+              submitting ||
+              (ticket.tracker === "customer_visit" && !customFields.visit_mode)
+            }
           >
             対応情報を更新
           </button>

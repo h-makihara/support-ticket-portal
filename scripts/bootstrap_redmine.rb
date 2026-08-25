@@ -140,15 +140,17 @@ end
 # Portal-specific issue fields. Boolean defaults are explicitly false so both
 # newly created and existing issues have a predictable value in the portal.
 custom_field_definitions = [
-  ["顧客ID", "string", "", false, tracker_names],
-  ["報告書渡し済み", "bool", "0", true, ["報告書"]],
-  ["予定・担当者アサイン済み", "bool", "0", true, ["客先同行"]]
+  ["顧客ID", "string", "", false, false, tracker_names, []],
+  ["報告書渡し済み", "bool", "0", false, true, ["報告書"], []],
+  ["予定・担当者アサイン済み", "bool", "0", false, true, ["客先同行"], []],
+  ["同行方法", "list", "", true, false, ["客先同行"], ["オンライン", "オフライン"]]
 ]
-custom_field_definitions.each do |name, format, default_value, support_only, field_tracker_names|
+custom_field_definitions.each do |name, format, default_value, required, support_only, field_tracker_names, possible_values|
   custom_field = IssueCustomField.find_or_initialize_by(name: name)
   custom_field.field_format = format
   custom_field.default_value = default_value
-  custom_field.is_required = false
+  custom_field.is_required = required
+  custom_field.possible_values = possible_values if format == "list"
   custom_field.is_for_all = false
   custom_field.trackers = field_tracker_names.map { |name| trackers.fetch(name) }
   custom_field.projects = [project]
@@ -231,9 +233,14 @@ end
 trackers.each_value do |tracker|
   abort "Tracker #{tracker.name} has the wrong default status" unless tracker.reload.default_status == statuses.fetch("対応待ち")
 end
-custom_field_definitions.each do |name, _format, _default_value, _support_only, field_tracker_names|
+custom_field_definitions.each do |name, format, _default_value, required, _support_only, field_tracker_names, possible_values|
   custom_field = IssueCustomField.find_by!(name: name)
   abort "Custom field #{name} has the wrong project" unless custom_field.projects.pluck(:id) == [project.id]
+  abort "Custom field #{name} has the wrong format" unless custom_field.field_format == format
+  abort "Custom field #{name} has the wrong required setting" unless custom_field.is_required == required
+  if format == "list" && custom_field.possible_values != possible_values
+    abort "Custom field #{name} has the wrong possible values"
+  end
   unless custom_field.trackers.pluck(:name).sort == field_tracker_names.sort
     abort "Custom field #{name} has incomplete tracker associations"
   end

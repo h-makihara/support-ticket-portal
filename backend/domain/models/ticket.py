@@ -5,6 +5,7 @@ from typing import Literal
 
 
 TrackerKey = Literal["inquiry", "report", "customer_visit"]
+VisitMode = Literal["オンライン", "オフライン"]
 TRACKER_NAMES: dict[TrackerKey, str] = {
     "inquiry": "問い合わせ",
     "report": "報告書",
@@ -24,6 +25,7 @@ class TicketCustomFields:
     customer_id: str = ""
     report_delivered: bool = False
     schedule_assigned: bool = False
+    visit_mode: str = ""
 
 
 @dataclass(frozen=True)

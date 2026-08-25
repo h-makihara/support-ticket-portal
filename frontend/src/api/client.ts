@@ -70,9 +70,11 @@ export interface Ticket {
   customer_id: string
   report_delivered?: boolean
   schedule_assigned?: boolean
+  visit_mode?: VisitMode
 }
 
 export type TrackerKey = 'inquiry' | 'report' | 'customer_visit'
+export type VisitMode = 'オンライン' | 'オフライン'
 
 export interface PaginationInfo {
   limit: number
@@ -113,6 +115,7 @@ export interface TicketCustomFields {
   customer_id: string
   report_delivered?: boolean
   schedule_assigned?: boolean
+  visit_mode?: VisitMode
 }
 
 export async function createTicket(data: { tracker: TrackerKey; subject: string; description: string; priority?: number } & TicketCustomFields): Promise<Ticket> {

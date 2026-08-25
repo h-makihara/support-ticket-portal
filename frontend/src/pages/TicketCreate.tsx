@@ -6,6 +6,7 @@ import {
   getTicketPriorityOptions,
   TicketPriorityOption,
   TrackerKey,
+  VisitMode,
 } from "../api/client";
 import { normalizePriorityName } from "../priority";
 
@@ -21,6 +22,7 @@ export function TicketCreate({ user }: { user: AuthUser }) {
   const [tracker, setTracker] = useState<TrackerKey>("inquiry");
   const [reportDelivered, setReportDelivered] = useState(false);
   const [scheduleAssigned, setScheduleAssigned] = useState(false);
+  const [visitMode, setVisitMode] = useState<VisitMode | "">("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,9 +45,18 @@ export function TicketCreate({ user }: { user: AuthUser }) {
 
   const handleSubmit = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!subject.trim() || !description.trim() || priority === null) {
+    if (
+      !subject.trim() ||
+      !description.trim() ||
+      priority === null ||
+      (tracker === "customer_visit" && !visitMode)
+    ) {
       setError(
-        priority === null ? "優先度を選択してください" : "件名と本文は必須です",
+        priority === null
+          ? "優先度を選択してください"
+          : tracker === "customer_visit" && !visitMode
+            ? "同行方法を選択してください"
+            : "件名と本文は必須です",
       );
       return;
     }
@@ -60,7 +71,7 @@ export function TicketCreate({ user }: { user: AuthUser }) {
         customer_id: customerId,
         ...(tracker === "report" ? { report_delivered: reportDelivered } : {}),
         ...(tracker === "customer_visit"
-          ? { schedule_assigned: scheduleAssigned }
+          ? { schedule_assigned: scheduleAssigned, visit_mode: visitMode as VisitMode }
           : {}),
       });
       navigate(`/tickets/${ticket.id}`);
@@ -168,6 +179,23 @@ export function TicketCreate({ user }: { user: AuthUser }) {
             />
           </div>
 
+          {tracker === "customer_visit" && (
+            <div className="form-group">
+              <label htmlFor="visit-mode">同行方法</label>
+              <select
+                id="visit-mode"
+                value={visitMode}
+                onChange={(e) => setVisitMode(e.target.value as VisitMode | "")}
+                disabled={loading}
+                required
+              >
+                <option value="">選択してください</option>
+                <option value="オンライン">オンライン</option>
+                <option value="オフライン">オフライン</option>
+              </select>
+            </div>
+          )}
+
           <div className="custom-field-checks">
             {user.roles.includes("support") && tracker === "report" && (
               <label>
@@ -200,7 +228,8 @@ export function TicketCreate({ user }: { user: AuthUser }) {
               loading ||
               priority === null ||
               !subject.trim() ||
-              !description.trim()
+              !description.trim() ||
+              (tracker === "customer_visit" && !visitMode)
             }
           >
             {loading ? "作成中..." : "作成する"}

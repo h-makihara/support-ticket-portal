@@ -21,6 +21,8 @@ def ticket_to_output(ticket: Ticket, *, include_support_only: bool) -> dict[str,
         "updated_on": ticket.updated_on,
         "customer_id": fields.customer_id,
     }
+    if ticket.tracker == "customer_visit":
+        result["visit_mode"] = fields.visit_mode
     if include_support_only:
         if ticket.tracker == "report":
             result["report_delivered"] = fields.report_delivered

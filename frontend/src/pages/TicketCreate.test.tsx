@@ -68,4 +68,44 @@ describe("TicketCreate", () => {
       ),
     );
   });
+
+  it("requires and submits a visit mode for customer visits", async () => {
+    render(
+      <MemoryRouter>
+        <TicketCreate
+          user={{ id: 1, username: "sales", name: "営業", roles: ["sales"] }}
+        />
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("option", { name: "通常" });
+    fireEvent.change(screen.getByLabelText("依頼内容"), {
+      target: { value: "customer_visit" },
+    });
+    const visitMode = screen.getByLabelText("同行方法");
+    expect(visitMode).toBeRequired();
+    expect(
+      within(visitMode)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["選択してください", "オンライン", "オフライン"]);
+
+    fireEvent.change(visitMode, { target: { value: "オフライン" } });
+    fireEvent.change(screen.getByPlaceholderText("件名を入力..."), {
+      target: { value: "客先同行" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("問い合わせ内容を入力..."), {
+      target: { value: "現地でお願いします" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "作成する" }));
+
+    await waitFor(() =>
+      expect(createTicketMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tracker: "customer_visit",
+          visit_mode: "オフライン",
+        }),
+      ),
+    );
+  });
 });

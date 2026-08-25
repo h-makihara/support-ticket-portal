@@ -77,6 +77,7 @@ INPUTなし。セッションを削除してCookieを無効化します。OUTPUT
 | `customer_id` | string | 顧客ID |
 | `report_delivered` | boolean / null | 報告書トラッカーでのみ `support` に返す |
 | `schedule_assigned` | boolean / null | 客先同行トラッカーでのみ `support` に返す |
+| `visit_mode` | `"オンライン"` / `"オフライン"` / null | 客先同行トラッカーで返す同行方法 |
 | `notes` | array | 詳細取得で返す互換コメント一覧 |
 | `audit_log` | array | 詳細取得で返すコメント・変更履歴 |
 
@@ -95,6 +96,7 @@ INPUT `CreateTicketInput`:
 | `customer_id` | string | | `""` |
 | `report_delivered` | boolean | | `false`、報告書トラッカーでのみsupportが反映 |
 | `schedule_assigned` | boolean | | `false`、客先同行トラッカーでのみsupportが反映 |
+| `visit_mode` | `"オンライン"` / `"オフライン"` | 客先同行のみ✓ | 客先同行チケットの作成時に必須 |
 
 OUTPUTは `TicketOutput`。報告書と客先同行の両方を依頼する場合は、トラッカーごとに別の `POST /tickets` を実行します。
 
@@ -114,7 +116,7 @@ INPUTは `ticket_id`。OUTPUTは履歴を含む `TicketOutput`。
 
 | Method / Path | INPUT | OUTPUT | 主な規則 |
 |---|---|---|---|
-| `PATCH /tickets/{id}/custom-fields` | `UpdateCustomFieldsInput`（全項目optional、1項目以上） | `DetailOutput` | support専用項目をsalesが更新すると`403`。報告書渡し済みは報告書、予定・担当者アサイン済みは客先同行でのみ更新可 |
+| `PATCH /tickets/{id}/custom-fields` | `UpdateCustomFieldsInput`（全項目optional、1項目以上） | `DetailOutput` | support専用項目をsalesが更新すると`403`。報告書渡し済みは報告書、予定・担当者アサイン済みと同行方法は客先同行でのみ更新可。同行方法はsupportのみ変更可 |
 | `POST /tickets/{id}/comments` | `{body: string}` | `DetailOutput` | trim後に空不可 |
 | `POST /tickets/{id}/answer` | `{body: string}` | `DetailOutput` | supportのみ。対応済み化して起票者へ戻す |
 | `PATCH /tickets/{id}/assignee` | なし | `DetailOutput` | supportのみ。自分へ割当て、対応中にする |
