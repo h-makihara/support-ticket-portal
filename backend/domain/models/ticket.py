@@ -26,6 +26,9 @@ class TicketCustomFields:
     report_delivered: bool = False
     schedule_assigned: bool = False
     visit_mode: str = ""
+    preferred_start_at_1: str = ""
+    preferred_start_at_2: str = ""
+    meeting_duration_minutes: int | None = None
 
 
 @dataclass(frozen=True)

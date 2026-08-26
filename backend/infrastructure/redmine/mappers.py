@@ -27,7 +27,12 @@ def issue_custom_fields(
         if definition["support_only"] and not include_support_only:
             continue
         value = values_by_name.get(definition["name"], "0" if definition["boolean"] else "")
-        result[key] = redmine_bool(value) if definition["boolean"] else str(value or "")
+        if definition["boolean"]:
+            result[key] = redmine_bool(value)
+        elif definition.get("integer"):
+            result[key] = int(value) if str(value or "").strip() else None
+        else:
+            result[key] = str(value or "")
     return result
 
 

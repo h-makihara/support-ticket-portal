@@ -127,6 +127,57 @@ describe("TicketDetail tracker controls", () => {
     expect(screen.queryByLabelText("同行方法")).not.toBeInTheDocument();
   });
 
+  it("lets support update customer visit schedule preferences", async () => {
+    getTicketMock.mockResolvedValue({
+      ...ticket("customer_visit", "客先同行"),
+      visit_mode: "オンライン",
+      preferred_start_at_1: "2026-09-01 10:00",
+      preferred_start_at_2: "2026-09-02 14:30",
+      meeting_duration_minutes: 60,
+    });
+    renderTicketDetail();
+
+    fireEvent.change(await screen.findByLabelText("開始希望日時 第一希望"), {
+      target: { value: "2026-09-03 09:00" },
+    });
+    fireEvent.change(screen.getByLabelText("予定会議時間（分）"), {
+      target: { value: "90" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "対応情報を更新" }));
+
+    await waitFor(() =>
+      expect(updateTicketCustomFieldsMock).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          preferred_start_at_1: "2026-09-03 09:00",
+          preferred_start_at_2: "2026-09-02 14:30",
+          meeting_duration_minutes: 90,
+        }),
+      ),
+    );
+  });
+
+  it("shows customer visit schedule preferences as text to sales users", async () => {
+    getTicketMock.mockResolvedValue({
+      ...ticket("customer_visit", "客先同行"),
+      visit_mode: "オンライン",
+      preferred_start_at_1: "2026-09-01 10:00",
+      preferred_start_at_2: null,
+      meeting_duration_minutes: 60,
+    });
+    renderTicketDetail({
+      id: 2,
+      username: "sales",
+      name: "営業",
+      roles: ["sales"],
+    });
+
+    expect(await screen.findByText("開始希望日時 第一希望: 2026-09-01 10:00")).toBeVisible();
+    expect(screen.getByText("開始希望日時 第二希望: 未設定")).toBeVisible();
+    expect(screen.getByText("予定会議時間: 60分")).toBeVisible();
+    expect(screen.queryByLabelText("開始希望日時 第一希望")).not.toBeInTheDocument();
+  });
+
   it.each(["オンライン", undefined])(
     "lets sales update customer ID without resending visit mode (%s)",
     async (visitMode) => {

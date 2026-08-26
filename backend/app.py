@@ -203,6 +203,15 @@ CUSTOM_FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "report_delivered": {"name": "報告書渡し済み", "label": "報告書を渡した", "boolean": True, "support_only": True},
     "schedule_assigned": {"name": "予定・担当者アサイン済み", "label": "予定・担当者をアサインした", "boolean": True, "support_only": True},
     "visit_mode": {"name": "同行方法", "label": "同行方法", "boolean": False, "support_only": False},
+    "preferred_start_at_1": {"name": "開始希望日時 第一希望", "label": "開始希望日時 第一希望", "boolean": False, "support_only": False},
+    "preferred_start_at_2": {"name": "開始希望日時 第二希望", "label": "開始希望日時 第二希望", "boolean": False, "support_only": False},
+    "meeting_duration_minutes": {"name": "予定会議時間", "label": "予定会議時間", "boolean": False, "integer": True, "support_only": False},
+}
+
+CUSTOMER_VISIT_SCHEDULING_FIELDS = {
+    "preferred_start_at_1",
+    "preferred_start_at_2",
+    "meeting_duration_minutes",
 }
 
 FAQ_PAGE_PREFIX = "FAQ_"
@@ -1121,6 +1130,13 @@ async def create_ticket(
             raise HTTPException(status_code=422, detail="客先同行では同行方法を選択してください")
         if ticket_data.tracker != "customer_visit" and ticket_data.visit_mode is not None:
             raise HTTPException(status_code=422, detail="同行方法は客先同行でのみ指定できます")
+        scheduling_values = {
+            key: getattr(ticket_data, key)
+            for key in CUSTOMER_VISIT_SCHEDULING_FIELDS
+            if getattr(ticket_data, key) is not None
+        }
+        if ticket_data.tracker != "customer_visit" and scheduling_values:
+            raise HTTPException(status_code=422, detail="訪問希望情報は客先同行でのみ指定できます")
 
         roles = await _required_user_roles(session.redmine_user_id)
         field_values = {
@@ -1132,6 +1148,7 @@ async def create_ticket(
             field_values["schedule_assigned"] = ticket_data.schedule_assigned
         if ticket_data.tracker == "customer_visit":
             field_values["visit_mode"] = ticket_data.visit_mode
+            field_values.update(scheduling_values)
         field_ids = await _custom_field_ids()
         payload = {
             "issue": {
@@ -1395,6 +1412,7 @@ async def update_custom_fields(
     roles = await _required_user_roles(session.redmine_user_id)
     if ROLE_SUPPORT not in roles and (
         "visit_mode" in values
+        or CUSTOMER_VISIT_SCHEDULING_FIELDS.intersection(values)
         or any(CUSTOM_FIELD_DEFINITIONS[key]["support_only"] for key in values)
     ):
         raise HTTPException(status_code=403, detail="サポートロールが必要です")
@@ -1408,7 +1426,11 @@ async def update_custom_fields(
             values.get(key) is True for key in AUTHOR_REASSIGNMENT_FIELDS
         )
         current_issue = None
-        tracker_specific_fields = AUTHOR_REASSIGNMENT_FIELDS | {"visit_mode"}
+        tracker_specific_fields = (
+            AUTHOR_REASSIGNMENT_FIELDS
+            | {"visit_mode"}
+            | CUSTOMER_VISIT_SCHEDULING_FIELDS
+        )
         if tracker_specific_fields.intersection(values):
             current_response = await client.get(f"/issues/{ticket_id}.json")
             if current_response.status_code != 200:
@@ -1422,6 +1444,9 @@ async def update_custom_fields(
                 "report_delivered": "報告書",
                 "schedule_assigned": "客先同行",
                 "visit_mode": "客先同行",
+                "preferred_start_at_1": "客先同行",
+                "preferred_start_at_2": "客先同行",
+                "meeting_duration_minutes": "客先同行",
             }
             for field in tracker_specific_fields.intersection(values):
                 expected_tracker = expected_trackers[field]

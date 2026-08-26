@@ -71,6 +71,9 @@ export interface Ticket {
   report_delivered?: boolean
   schedule_assigned?: boolean
   visit_mode?: VisitMode | null
+  preferred_start_at_1?: string | null
+  preferred_start_at_2?: string | null
+  meeting_duration_minutes?: number | null
 }
 
 export type TrackerKey = 'inquiry' | 'report' | 'customer_visit'
@@ -116,6 +119,9 @@ export interface TicketCustomFields {
   report_delivered?: boolean
   schedule_assigned?: boolean
   visit_mode?: VisitMode
+  preferred_start_at_1?: string | null
+  preferred_start_at_2?: string | null
+  meeting_duration_minutes?: number | null
 }
 
 export async function createTicket(data: { tracker: TrackerKey; subject: string; description: string; priority?: number } & TicketCustomFields): Promise<Ticket> {

@@ -143,7 +143,10 @@ custom_field_definitions = [
   ["顧客ID", "string", "", false, false, tracker_names, []],
   ["報告書渡し済み", "bool", "0", false, true, ["報告書"], []],
   ["予定・担当者アサイン済み", "bool", "0", false, true, ["客先同行"], []],
-  ["同行方法", "list", "", true, false, ["客先同行"], ["オンライン", "オフライン"]]
+  ["同行方法", "list", "", true, false, ["客先同行"], ["オンライン", "オフライン"]],
+  ["開始希望日時 第一希望", "string", "", false, false, ["客先同行"], []],
+  ["開始希望日時 第二希望", "string", "", false, false, ["客先同行"], []],
+  ["予定会議時間", "int", "", false, false, ["客先同行"], []]
 ]
 custom_field_definitions.each do |name, format, default_value, required, support_only, field_tracker_names, possible_values|
   custom_field = IssueCustomField.find_or_initialize_by(name: name)

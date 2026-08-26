@@ -138,7 +138,10 @@ expected_field_trackers = {
   "顧客ID" => TRACKER_NAMES,
   "報告書渡し済み" => ["報告書"],
   "予定・担当者アサイン済み" => ["客先同行"],
-  "同行方法" => ["客先同行"]
+  "同行方法" => ["客先同行"],
+  "開始希望日時 第一希望" => ["客先同行"],
+  "開始希望日時 第二希望" => ["客先同行"],
+  "予定会議時間" => ["客先同行"]
 }
 expected_field_trackers.each do |name, expected_trackers|
   field = IssueCustomField.find_by!(name: name)
@@ -151,6 +154,16 @@ assert_test(visit_mode.field_format == "list", "visit mode field format")
 assert_test(visit_mode.possible_values == ["オンライン", "オフライン"], "visit mode options")
 assert_test(visit_mode.is_required?, "visit mode must be required")
 assert_test(!visit_mode.multiple?, "visit mode must allow only one choice")
+
+{
+  "開始希望日時 第一希望" => "string",
+  "開始希望日時 第二希望" => "string",
+  "予定会議時間" => "int"
+}.each do |name, format|
+  field = IssueCustomField.find_by!(name: name)
+  assert_test(field.field_format == format, "#{name} field format")
+  assert_test(!field.is_required?, "#{name} must be optional")
+end
 
 ["営業担当者", "サポート担当者"].each do |role_name|
   role = Role.find_by!(name: role_name)

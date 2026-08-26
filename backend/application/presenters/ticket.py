@@ -23,6 +23,9 @@ def ticket_to_output(ticket: Ticket, *, include_support_only: bool) -> dict[str,
     }
     if ticket.tracker == "customer_visit":
         result["visit_mode"] = fields.visit_mode or None
+        result["preferred_start_at_1"] = fields.preferred_start_at_1 or None
+        result["preferred_start_at_2"] = fields.preferred_start_at_2 or None
+        result["meeting_duration_minutes"] = fields.meeting_duration_minutes
     if include_support_only:
         if ticket.tracker == "report":
             result["report_delivered"] = fields.report_delivered

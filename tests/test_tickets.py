@@ -198,6 +198,78 @@ class TestCreateTicket:
         )
         assert {"id": 17, "value": "オンライン"} in json.loads(request.content)["issue"]["custom_fields"]
 
+    def test_customer_visit_sends_optional_schedule_preferences(self, client: TestClient):
+        response = client.post("/tickets", json={
+            "tracker": "customer_visit",
+            "subject": "訪問依頼",
+            "description": "同行をお願いします",
+            "visit_mode": "オンライン",
+            "preferred_start_at_1": "2026-09-01 10:00",
+            "preferred_start_at_2": "2026-09-02 14:30",
+            "meeting_duration_minutes": 60,
+        })
+
+        assert response.status_code == 200
+        request = next(
+            call.request for call in respx.calls
+            if call.request.method == "POST" and call.request.url.path == "/issues.json"
+        )
+        fields = json.loads(request.content)["issue"]["custom_fields"]
+        assert {"id": 18, "value": "2026-09-01 10:00"} in fields
+        assert {"id": 19, "value": "2026-09-02 14:30"} in fields
+        assert {"id": 20, "value": "60"} in fields
+
+    @pytest.mark.parametrize("value", [
+        "2026/09/01 10:00",
+        "2026-09-01T10:00",
+        "2026-02-30 10:00",
+        "2026-09-01 24:00",
+    ])
+    def test_customer_visit_rejects_invalid_preferred_start_datetime(
+        self, client: TestClient, value: str
+    ):
+        response = client.post("/tickets", json={
+            "tracker": "customer_visit",
+            "subject": "訪問依頼",
+            "description": "同行をお願いします",
+            "visit_mode": "オンライン",
+            "preferred_start_at_1": value,
+        })
+
+        assert response.status_code == 422
+        assert not any(
+            call.request.method == "POST" and call.request.url.path == "/issues.json"
+            for call in respx.calls
+        )
+
+    @pytest.mark.parametrize("minutes", [0, -1])
+    def test_customer_visit_rejects_non_positive_meeting_duration(
+        self, client: TestClient, minutes: int
+    ):
+        response = client.post("/tickets", json={
+            "tracker": "customer_visit",
+            "subject": "訪問依頼",
+            "description": "同行をお願いします",
+            "visit_mode": "オンライン",
+            "meeting_duration_minutes": minutes,
+        })
+
+        assert response.status_code == 422
+
+    def test_non_customer_visit_rejects_schedule_preferences(self, client: TestClient):
+        response = client.post("/tickets", json={
+            "tracker": "inquiry",
+            "subject": "問い合わせ",
+            "description": "本文",
+            "preferred_start_at_1": "2026-09-01 10:00",
+        })
+
+        assert response.status_code == 422
+        assert not any(
+            call.request.method == "POST" and call.request.url.path == "/issues.json"
+            for call in respx.calls
+        )
+
     def test_non_customer_visit_rejects_visit_mode(self, client: TestClient):
         response = client.post("/tickets", json={
             "tracker": "inquiry",
@@ -616,6 +688,65 @@ class TestCustomFields:
         assert json.loads(update_request.content) == {
             "issue": {"custom_fields": [{"id": 17, "value": "オフライン"}]}
         }
+
+    def test_support_sees_and_updates_customer_visit_schedule_preferences(
+        self, client: TestClient
+    ):
+        detail = client.get("/tickets/101")
+        assert detail.json()["preferred_start_at_1"] == "2026-09-01 10:00"
+        assert detail.json()["preferred_start_at_2"] == "2026-09-02 14:30"
+        assert detail.json()["meeting_duration_minutes"] == 60
+
+        response = client.patch("/tickets/101/custom-fields", json={
+            "preferred_start_at_1": "2026-09-03 09:00",
+            "preferred_start_at_2": None,
+            "meeting_duration_minutes": 90,
+        })
+
+        assert response.status_code == 200
+        update_request = next(
+            call.request for call in reversed(respx.calls)
+            if call.request.method == "PUT" and call.request.url.path == "/issues/101.json"
+        )
+        assert json.loads(update_request.content) == {"issue": {"custom_fields": [
+            {"id": 18, "value": "2026-09-03 09:00"},
+            {"id": 19, "value": ""},
+            {"id": 20, "value": "90"},
+        ]}}
+
+    @pytest.mark.parametrize("field", [
+        "preferred_start_at_1",
+        "preferred_start_at_2",
+        "meeting_duration_minutes",
+    ])
+    def test_sales_cannot_update_customer_visit_schedule_preferences(
+        self, client: TestClient, field: str
+    ):
+        store = app.dependency_overrides[get_session_store]()
+        store.sessions["test-session"] = replace(
+            store.sessions["test-session"], redmine_user_id=8
+        )
+
+        response = client.patch(
+            "/tickets/101/custom-fields",
+            json={field: 60 if field == "meeting_duration_minutes" else "2026-09-03 09:00"},
+        )
+
+        assert response.status_code == 403
+
+    def test_schedule_preference_update_requires_customer_visit_tracker(
+        self, client: TestClient
+    ):
+        response = client.patch(
+            "/tickets/100/custom-fields",
+            json={"meeting_duration_minutes": 60},
+        )
+
+        assert response.status_code == 422
+        assert not any(
+            call.request.method == "PUT" and call.request.url.path == "/issues/100.json"
+            for call in respx.calls
+        )
 
     def test_visit_mode_update_requires_customer_visit_tracker(self, client: TestClient):
         response = client.patch(

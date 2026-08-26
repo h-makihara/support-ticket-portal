@@ -60,7 +60,13 @@ export function TicketDetail({ user }: { user: AuthUser }) {
           ? { report_delivered: t.report_delivered }
           : {}),
         ...(t.tracker === "customer_visit" && user.roles.includes("support")
-          ? { schedule_assigned: t.schedule_assigned, visit_mode: t.visit_mode }
+          ? {
+              schedule_assigned: t.schedule_assigned,
+              visit_mode: t.visit_mode,
+              preferred_start_at_1: t.preferred_start_at_1,
+              preferred_start_at_2: t.preferred_start_at_2,
+              meeting_duration_minutes: t.meeting_duration_minutes,
+            }
           : {}),
       });
       setAuditLog(t.audit_log ?? []);
@@ -260,26 +266,81 @@ export function TicketDetail({ user }: { user: AuthUser }) {
           </div>
           {ticket.tracker === "customer_visit" &&
             (user.roles.includes("support") ? (
-              <div className="form-group">
-                <label htmlFor="visit-mode">同行方法</label>
-                <select
-                  id="visit-mode"
-                  value={customFields.visit_mode ?? ""}
-                  onChange={(e) =>
-                    setCustomFields({
-                      ...customFields,
-                      visit_mode: e.target.value as VisitMode,
-                    })
-                  }
-                  required
-                >
-                  <option value="">選択してください</option>
-                  <option value="オンライン">オンライン</option>
-                  <option value="オフライン">オフライン</option>
-                </select>
-              </div>
+              <>
+                <div className="form-group">
+                  <label htmlFor="visit-mode">同行方法</label>
+                  <select
+                    id="visit-mode"
+                    value={customFields.visit_mode ?? ""}
+                    onChange={(e) =>
+                      setCustomFields({
+                        ...customFields,
+                        visit_mode: e.target.value as VisitMode,
+                      })
+                    }
+                    required
+                  >
+                    <option value="">選択してください</option>
+                    <option value="オンライン">オンライン</option>
+                    <option value="オフライン">オフライン</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="preferred-start-at-1">開始希望日時 第一希望</label>
+                  <input
+                    id="preferred-start-at-1"
+                    type="text"
+                    value={customFields.preferred_start_at_1 ?? ""}
+                    onChange={(e) =>
+                      setCustomFields({
+                        ...customFields,
+                        preferred_start_at_1: e.target.value || null,
+                      })
+                    }
+                    placeholder="例: 2026-08-26 14:30"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="preferred-start-at-2">開始希望日時 第二希望</label>
+                  <input
+                    id="preferred-start-at-2"
+                    type="text"
+                    value={customFields.preferred_start_at_2 ?? ""}
+                    onChange={(e) =>
+                      setCustomFields({
+                        ...customFields,
+                        preferred_start_at_2: e.target.value || null,
+                      })
+                    }
+                    placeholder="例: 2026-08-26 14:30"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="meeting-duration-minutes">予定会議時間（分）</label>
+                  <input
+                    id="meeting-duration-minutes"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={customFields.meeting_duration_minutes ?? ""}
+                    onChange={(e) =>
+                      setCustomFields({
+                        ...customFields,
+                        meeting_duration_minutes: e.target.value
+                          ? Number(e.target.value)
+                          : null,
+                      })
+                    }
+                  />
+                </div>
+              </>
             ) : (
-              <p>同行方法: {ticket.visit_mode || "未設定"}</p>
+              <div>
+                <p>同行方法: {ticket.visit_mode || "未設定"}</p>
+                <p>開始希望日時 第一希望: {ticket.preferred_start_at_1 || "未設定"}</p>
+                <p>開始希望日時 第二希望: {ticket.preferred_start_at_2 || "未設定"}</p>
+                <p>予定会議時間: {ticket.meeting_duration_minutes ? `${ticket.meeting_duration_minutes}分` : "未設定"}</p>
+              </div>
             ))}
           <div className="custom-field-checks">
             {user.roles.includes("support") && ticket.tracker === "report" && (

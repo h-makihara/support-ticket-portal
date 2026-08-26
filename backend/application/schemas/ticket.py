@@ -1,9 +1,31 @@
-from typing import Any, Literal
+from datetime import datetime
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from backend.application.schemas.common import PaginationOutput
 from backend.domain.models.ticket import TrackerKey, VisitMode
+
+
+def validate_preferred_datetime(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("日時はYYYY-MM-DD hh:mm形式で入力してください")
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d %H:%M")
+    except ValueError:
+        raise ValueError("日時はYYYY-MM-DD hh:mm形式で入力してください") from None
+    if parsed.strftime("%Y-%m-%d %H:%M") != value:
+        raise ValueError("日時はYYYY-MM-DD hh:mm形式で入力してください")
+    return value
+
+
+PreferredDatetime = Annotated[str | None, BeforeValidator(validate_preferred_datetime)]
+MeetingDurationMinutes = Annotated[int, Field(strict=True, gt=0)]
 
 
 class CreateTicketInput(BaseModel):
@@ -17,6 +39,9 @@ class CreateTicketInput(BaseModel):
     report_delivered: bool = Field(default=False, description="サポートロールのみ反映")
     schedule_assigned: bool = Field(default=False, description="サポートロールのみ反映")
     visit_mode: VisitMode | None = Field(default=None, description="客先同行で必須")
+    preferred_start_at_1: PreferredDatetime = None
+    preferred_start_at_2: PreferredDatetime = None
+    meeting_duration_minutes: MeetingDurationMinutes | None = None
 
 
 class UpdateCustomFieldsInput(BaseModel):
@@ -26,6 +51,9 @@ class UpdateCustomFieldsInput(BaseModel):
     report_delivered: bool | None = None
     schedule_assigned: bool | None = None
     visit_mode: VisitMode | None = None
+    preferred_start_at_1: PreferredDatetime = None
+    preferred_start_at_2: PreferredDatetime = None
+    meeting_duration_minutes: MeetingDurationMinutes | None = None
 
 
 class AddCommentInput(BaseModel):
@@ -85,6 +113,9 @@ class TicketOutput(BaseModel):
     report_delivered: bool | None = None
     schedule_assigned: bool | None = None
     visit_mode: VisitMode | None = None
+    preferred_start_at_1: str | None = None
+    preferred_start_at_2: str | None = None
+    meeting_duration_minutes: int | None = None
 
 
 class TicketListOutput(BaseModel):

@@ -23,6 +23,9 @@ export function TicketCreate({ user }: { user: AuthUser }) {
   const [reportDelivered, setReportDelivered] = useState(false);
   const [scheduleAssigned, setScheduleAssigned] = useState(false);
   const [visitMode, setVisitMode] = useState<VisitMode | "">("");
+  const [preferredStartAt1, setPreferredStartAt1] = useState("");
+  const [preferredStartAt2, setPreferredStartAt2] = useState("");
+  const [meetingDurationMinutes, setMeetingDurationMinutes] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,7 +74,19 @@ export function TicketCreate({ user }: { user: AuthUser }) {
         customer_id: customerId,
         ...(tracker === "report" ? { report_delivered: reportDelivered } : {}),
         ...(tracker === "customer_visit"
-          ? { schedule_assigned: scheduleAssigned, visit_mode: visitMode as VisitMode }
+          ? {
+              schedule_assigned: scheduleAssigned,
+              visit_mode: visitMode as VisitMode,
+              ...(preferredStartAt1.trim()
+                ? { preferred_start_at_1: preferredStartAt1.trim() }
+                : {}),
+              ...(preferredStartAt2.trim()
+                ? { preferred_start_at_2: preferredStartAt2.trim() }
+                : {}),
+              ...(meetingDurationMinutes
+                ? { meeting_duration_minutes: Number(meetingDurationMinutes) }
+                : {}),
+            }
           : {}),
       });
       navigate(`/tickets/${ticket.id}`);
@@ -180,20 +195,56 @@ export function TicketCreate({ user }: { user: AuthUser }) {
           </div>
 
           {tracker === "customer_visit" && (
-            <div className="form-group">
-              <label htmlFor="visit-mode">同行方法</label>
-              <select
-                id="visit-mode"
-                value={visitMode}
-                onChange={(e) => setVisitMode(e.target.value as VisitMode | "")}
-                disabled={loading}
-                required
-              >
-                <option value="">選択してください</option>
-                <option value="オンライン">オンライン</option>
-                <option value="オフライン">オフライン</option>
-              </select>
-            </div>
+            <>
+              <div className="form-group">
+                <label htmlFor="visit-mode">同行方法</label>
+                <select
+                  id="visit-mode"
+                  value={visitMode}
+                  onChange={(e) => setVisitMode(e.target.value as VisitMode | "")}
+                  disabled={loading}
+                  required
+                >
+                  <option value="">選択してください</option>
+                  <option value="オンライン">オンライン</option>
+                  <option value="オフライン">オフライン</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="preferred-start-at-1">開始希望日時 第一希望</label>
+                <input
+                  id="preferred-start-at-1"
+                  type="text"
+                  value={preferredStartAt1}
+                  onChange={(e) => setPreferredStartAt1(e.target.value)}
+                  placeholder="例: 2026-08-26 14:30"
+                  disabled={loading}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="preferred-start-at-2">開始希望日時 第二希望</label>
+                <input
+                  id="preferred-start-at-2"
+                  type="text"
+                  value={preferredStartAt2}
+                  onChange={(e) => setPreferredStartAt2(e.target.value)}
+                  placeholder="例: 2026-08-26 14:30"
+                  disabled={loading}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="meeting-duration-minutes">予定会議時間（分）</label>
+                <input
+                  id="meeting-duration-minutes"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={meetingDurationMinutes}
+                  onChange={(e) => setMeetingDurationMinutes(e.target.value)}
+                  disabled={loading}
+                />
+              </div>
+            </>
           )}
 
           <div className="custom-field-checks">
