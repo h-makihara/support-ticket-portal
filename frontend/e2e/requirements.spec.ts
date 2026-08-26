@@ -20,7 +20,9 @@ for (const tracker of ["報告書", "客先同行"] as const) {
       ).toBeVisible();
     }
     await salesPage.goto("/");
-    const row = salesPage.getByRole("row").filter({ hasText: ticket.subject });
-    await expect(row).toContainText(tracker);
+    const group = salesPage.getByRole("region", { name: tracker });
+    await expect(
+      group.getByRole("row").filter({ hasText: ticket.subject }),
+    ).toBeVisible();
   });
 }

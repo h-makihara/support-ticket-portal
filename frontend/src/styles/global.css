@@ -114,7 +114,8 @@ h3 { margin-bottom: 20px; font-size: 22px; line-height: 1.25; letter-spacing: -.
 .table td:nth-child(2) a:hover { text-decoration-color: var(--ink); }
 .status-badge, .priority-badge { display: inline-block; min-width: 48px; padding: 4px 9px; border: 1px solid transparent; border-radius: 6px; font-size: 12px; font-weight: 500; line-height: 1.35; text-align: center; white-space: nowrap; }
 .status-badge { color: #4b4b49; background: var(--surface-2); border-color: #ded9d2; }
-.status-open, .status-新規, .status-対応待ち { color: #144f7e; background: #eaf5ff; border-color: #cbe4f7; }
+.status-open, .status-新規 { color: #144f7e; background: #eaf5ff; border-color: #cbe4f7; }
+.status-対応待ち { color: #be185d; background: #fce7f3; border-color: #fbcfe8; }
 .status-in-progress, .status-対応中 { color: #8a4300; background: #fff1df; border-color: #f3d2aa; }
 .status-feedback, .status-回答済, .status-対応済 { color: #176338; background: #e9f6ed; border-color: #c9e8d3; }
 .status-closed, .status-クローズ { color: var(--ink-muted); background: var(--surface-2); border-color: #ded9d2; }
@@ -125,9 +126,13 @@ h3 { margin-bottom: 20px; font-size: 22px; line-height: 1.25; letter-spacing: -.
 .priority-level-5 { color: #fff; background: var(--danger); border-color: var(--danger); }
 
 .ticket-list-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.ticket-status-filter { display: flex; align-items: center; gap: 10px; }
+.ticket-status-filter label { color: var(--ink-muted); font-size: 14px; font-weight: 500; }
 .ticket-list-toolbar select { width: auto; min-width: 180px; }
 .ticket-count { color: var(--ink-muted); font-size: 14px; }
 .refresh-button { margin-left: auto; }
+.ticket-groups { display: grid; gap: 28px; }
+.ticket-group h2 { margin-bottom: 10px; font-size: 20px; }
 .pagination { display: flex; justify-content: center; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
 .pagination .btn { min-width: 40px; padding: 8px 12px; }
 
@@ -175,6 +180,7 @@ h3 { margin-bottom: 20px; font-size: 22px; line-height: 1.25; letter-spacing: -.
   .login-card h1 { font-size: 34px; }
   .card { padding: 22px 18px; }
   .ticket-list-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .ticket-status-filter { width: 100%; align-items: stretch; flex-direction: column; gap: 6px; }
   .ticket-list-toolbar select { width: 100%; }
   .refresh-button { margin-left: 0; }
   .comment-actions, .confirm-dialog-actions { flex-direction: column-reverse; }

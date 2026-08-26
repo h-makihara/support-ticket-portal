@@ -4,17 +4,23 @@ import type { Ticket } from '../api/client'
 const { getTicketsMock } = vi.hoisted(() => ({ getTicketsMock: vi.fn() }))
 vi.mock('../api/client', () => ({ getTickets: getTicketsMock }))
 
+import { groupTicketsByTracker } from '../ticketGrouping'
 import { fetchAllTickets, filterTicketsByStatus } from './TicketList'
 
-const ticket = (id: number, status: string): Ticket => ({
+const ticket = (
+  id: number,
+  status: string,
+  tracker: Ticket['tracker'] = 'inquiry',
+  trackerName = '問い合わせ',
+): Ticket => ({
   id,
   subject: '',
   description: '',
   status,
   priority: 1,
   priority_name: '通常',
-  tracker: 'inquiry',
-  tracker_name: '問い合わせ',
+  tracker,
+  tracker_name: trackerName,
   assignee: null,
   customer_id: '',
 })
@@ -62,5 +68,26 @@ describe('ticket list cache', () => {
     const tickets = [ticket(1, '独自ステータス')]
 
     expect(filterTicketsByStatus(tickets, 'unknown')).toBe(tickets)
+  })
+})
+
+describe('ticket grouping', () => {
+  it('groups by tracker while preserving the first group and ticket order', () => {
+    const tickets = [
+      ticket(1, '対応待ち', 'report', '報告書'),
+      ticket(2, '対応中'),
+      ticket(3, '対応済', 'report', '報告書'),
+      ticket(4, 'クローズ', 'customer_visit', '客先同行'),
+    ]
+
+    expect(groupTicketsByTracker(tickets)).toEqual([
+      { tracker: 'report', name: '報告書', tickets: [tickets[0], tickets[2]] },
+      { tracker: 'inquiry', name: '問い合わせ', tickets: [tickets[1]] },
+      { tracker: 'customer_visit', name: '客先同行', tickets: [tickets[3]] },
+    ])
+  })
+
+  it('returns no sections when there are no visible tickets', () => {
+    expect(groupTicketsByTracker([])).toEqual([])
   })
 })

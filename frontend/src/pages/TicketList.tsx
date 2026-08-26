@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AuthUser, getTickets, Ticket } from "../api/client";
 import { priorityBadgeClass, priorityLabel } from "../priority";
+import { groupTicketsByTracker } from "../ticketGrouping";
 
 const STATUS_OPTIONS = [
   { value: "", label: "すべて", names: [] },
@@ -47,6 +48,51 @@ export function filterTicketsByStatus(
   return tickets.filter((ticket) => option.names.includes(ticket.status));
 }
 
+function TicketTable({ tickets }: { tickets: Ticket[] }) {
+  return (
+    <table className="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>件名</th>
+          <th>顧客ID</th>
+          <th>ステータス</th>
+          <th>優先度</th>
+          <th>作成日</th>
+        </tr>
+      </thead>
+      <tbody>
+        {tickets.map((ticket) => (
+          <tr key={ticket.id}>
+            <td>{ticket.id}</td>
+            <td>
+              <Link to={`/tickets/${ticket.id}`}>{ticket.subject}</Link>
+            </td>
+            <td>{ticket.customer_id || "-"}</td>
+            <td>
+              <span
+                className={`status-badge status-${ticket.status.toLowerCase().replace(/\s+/g, "_")}`}
+              >
+                {ticket.status}
+              </span>
+            </td>
+            <td>
+              <span className={priorityBadgeClass(ticket)}>
+                {priorityLabel(ticket)}
+              </span>
+            </td>
+            <td>
+              {ticket.created_on
+                ? new Date(ticket.created_on).toLocaleDateString()
+                : "-"}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 export function TicketList({ user }: { user: AuthUser }) {
   const [allTickets, setAllTickets] = useState<Ticket[]>([]);
   const [status, setStatus] = useState("");
@@ -82,6 +128,7 @@ export function TicketList({ user }: { user: AuthUser }) {
     [allTickets, status],
   );
   const tickets = filteredTickets.slice(offset, offset + PAGE_SIZE);
+  const ticketGroups = groupTicketsByTracker(tickets);
   const totalCount = filteredTickets.length;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
   const currentPage = Math.floor(offset / PAGE_SIZE);
@@ -128,17 +175,21 @@ export function TicketList({ user }: { user: AuthUser }) {
       )}
 
       <div className="ticket-list-toolbar">
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          aria-label="ステータスで絞り込み"
-        >
-          {STATUS_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        <div className="ticket-status-filter">
+          <label htmlFor="ticket-status-filter">ステータス</label>
+          <select
+            id="ticket-status-filter"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            aria-label="ステータスで絞り込み"
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <span className="ticket-count">合計 {totalCount} 件</span>
         {user.roles.includes("support") && (
           <button
@@ -155,48 +206,18 @@ export function TicketList({ user }: { user: AuthUser }) {
         <div className="empty">チケットがありません</div>
       ) : (
         <>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>件名</th>
-                <th>依頼内容</th>
-                <th>顧客ID</th>
-                <th>ステータス</th>
-                <th>優先度</th>
-                <th>作成日</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tickets.map((ticket) => (
-                <tr key={ticket.id}>
-                  <td>{ticket.id}</td>
-                  <td>
-                    <Link to={`/tickets/${ticket.id}`}>{ticket.subject}</Link>
-                  </td>
-                  <td>{ticket.tracker_name}</td>
-                  <td>{ticket.customer_id || "-"}</td>
-                  <td>
-                    <span
-                      className={`status-badge status-${ticket.status.toLowerCase().replace(/\s+/g, "_")}`}
-                    >
-                      {ticket.status}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={priorityBadgeClass(ticket)}>
-                      {priorityLabel(ticket)}
-                    </span>
-                  </td>
-                  <td>
-                    {ticket.created_on
-                      ? new Date(ticket.created_on).toLocaleDateString()
-                      : "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="ticket-groups">
+            {ticketGroups.map((group) => (
+              <section
+                aria-labelledby={`ticket-group-${group.tracker}`}
+                className="ticket-group"
+                key={group.tracker}
+              >
+                <h2 id={`ticket-group-${group.tracker}`}>{group.name}</h2>
+                <TicketTable tickets={group.tickets} />
+              </section>
+            ))}
+          </div>
 
           {totalPages > 1 && (
             <div className="pagination">

@@ -7,6 +7,7 @@ import {
   TicketListResponse,
 } from "../api/client";
 import { priorityBadgeClass, priorityLabel } from "../priority";
+import { groupTicketsByTracker } from "../ticketGrouping";
 
 const PAGE_SIZE = 20;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -31,6 +32,79 @@ export function formatUpdatedOn(updatedOn: string | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function AnswerTicketTable({
+  tickets,
+  onClaim,
+}: {
+  tickets: Ticket[];
+  onClaim: (ticket: Ticket) => void;
+}) {
+  return (
+    <table className="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>件名</th>
+          <th>ステータス</th>
+          <th>優先度</th>
+          <th>対応者</th>
+          <th>前回担当</th>
+          <th>作成日</th>
+          <th>最終更新日</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {tickets.map((ticket) => (
+          <tr key={ticket.id}>
+            <td>{ticket.id}</td>
+            <td>
+              <Link to={`/tickets/${ticket.id}`}>{ticket.subject}</Link>
+            </td>
+            <td>
+              <span
+                className={`status-badge status-${ticket.status.toLowerCase().replace(/\s+/g, "_")}`}
+              >
+                {ticket.status}
+              </span>
+            </td>
+            <td>
+              <span className={priorityBadgeClass(ticket)}>
+                {priorityLabel(ticket)}
+              </span>
+            </td>
+            <td>{ticket.assignee?.name || "未割り当て"}</td>
+            <td>{ticket.latest_support_responder?.name || "—"}</td>
+            <td>
+              {ticket.created_on
+                ? new Date(ticket.created_on).toLocaleDateString()
+                : "-"}
+            </td>
+            <td
+              className={
+                isUpdatedAtLeastOneDayAgo(ticket.updated_on)
+                  ? "ticket-updated-overdue"
+                  : undefined
+              }
+            >
+              {formatUpdatedOn(ticket.updated_on)}
+            </td>
+            <td>
+              <button
+                className="btn btn-primary"
+                style={{ padding: "0.5rem 1rem" }}
+                onClick={() => onClaim(ticket)}
+              >
+                対応する
+              </button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 export function AnswerTicketList() {
@@ -95,6 +169,7 @@ export function AnswerTicketList() {
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
   const currentPage = Math.floor(offset / PAGE_SIZE);
+  const ticketGroups = groupTicketsByTracker(tickets);
 
   if (loading) return <div className="loading">読み込み中...</div>;
 
@@ -131,70 +206,23 @@ export function AnswerTicketList() {
         <div className="empty">対応すべきチケットはありません</div>
       ) : (
         <>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>件名</th>
-                <th>依頼内容</th>
-                <th>ステータス</th>
-                <th>優先度</th>
-                <th>対応者</th>
-                <th>前回担当</th>
-                <th>作成日</th>
-                <th>最終更新日</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tickets.map((ticket) => (
-                <tr key={ticket.id}>
-                  <td>{ticket.id}</td>
-                  <td>
-                    <Link to={`/tickets/${ticket.id}`}>{ticket.subject}</Link>
-                  </td>
-                  <td>{ticket.tracker_name}</td>
-                  <td>
-                    <span
-                      className={`status-badge status-${ticket.status.toLowerCase().replace(/\s+/g, "_")}`}
-                    >
-                      {ticket.status}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={priorityBadgeClass(ticket)}>
-                      {priorityLabel(ticket)}
-                    </span>
-                  </td>
-                  <td>{ticket.assignee?.name || "未割り当て"}</td>
-                  <td>{ticket.latest_support_responder?.name || "—"}</td>
-                  <td>
-                    {ticket.created_on
-                      ? new Date(ticket.created_on).toLocaleDateString()
-                      : "-"}
-                  </td>
-                  <td
-                    className={
-                      isUpdatedAtLeastOneDayAgo(ticket.updated_on)
-                        ? "ticket-updated-overdue"
-                        : undefined
-                    }
-                  >
-                    {formatUpdatedOn(ticket.updated_on)}
-                  </td>
-                  <td>
-                    <button
-                      className="btn btn-primary"
-                      style={{ padding: "0.5rem 1rem" }}
-                      onClick={() => setTicketToClaim(ticket)}
-                    >
-                      対応する
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="ticket-groups">
+            {ticketGroups.map((group) => (
+              <section
+                aria-labelledby={`answer-ticket-group-${group.tracker}`}
+                className="ticket-group"
+                key={group.tracker}
+              >
+                <h2 id={`answer-ticket-group-${group.tracker}`}>
+                  {group.name}
+                </h2>
+                <AnswerTicketTable
+                  tickets={group.tickets}
+                  onClaim={setTicketToClaim}
+                />
+              </section>
+            ))}
+          </div>
 
           {/* Pagination Controls */}
           {totalPages > 1 && (
